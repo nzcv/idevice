@@ -1,0 +1,30 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# IDEs
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+Icon?
+$RECYCLE.BIN/
+$SystemVolumeInformation/
+$Windows.~WS/
+$Windows.~WS/
+
+# tests_real
+tests_real/
+ios3.py
+*.ipa

@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "idevice"
+version = "0.4.1"
+description = "Cross-platform device automation for end-to-end test workflows"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pymobiledevice3>=9.15.2",
+    "uiautomator2>=3.5.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.14",
+    "ruff>=0.9",
+]
+
+[tool.hatch.build]
+sources = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = ["-m", "not integration"]
+markers = [
+    "integration: requires a connected physical device (see tests/device/)",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]
