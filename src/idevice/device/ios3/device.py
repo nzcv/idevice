@@ -308,7 +308,7 @@ class IOSDevice3(DeviceBase):
         if not remote:
             raise ValueError("remote is required and must be a non-empty string")
         import asyncio
-
+        remote = f'/Documents/{remote}'
         async def main() -> bool:
             async with self._documents_afc(app_id) as afc:
                 return await afc.exists(remote)
@@ -322,7 +322,7 @@ class IOSDevice3(DeviceBase):
         if not remote:
             raise ValueError("remote is required and must be a non-empty string")
         import asyncio
-
+        remote = f'/Documents/{remote}'
         async def main() -> list[str]:
             entries: list[str] = []
             async with self._documents_afc(app_id) as afc:
@@ -339,7 +339,7 @@ class IOSDevice3(DeviceBase):
         if not remote:
             raise ValueError("remote is required and must be a non-empty string")
         import asyncio
-
+        remote = f'/Documents/{remote}'
         async def main() -> bool:
             async with self._documents_afc(app_id) as afc:
                 if not await afc.exists(remote):
@@ -357,7 +357,7 @@ class IOSDevice3(DeviceBase):
             raise ValueError("remote is required and must be a non-empty string")
         import asyncio
         import os
-
+        remote = f'/Documents/{remote}'
         async def main() -> bool:
             async with self._documents_afc(app_id) as afc:
                 if not os.path.exists(local):
@@ -374,7 +374,7 @@ class IOSDevice3(DeviceBase):
         if not remote:
             raise ValueError("remote is required and must be a non-empty string")
         import asyncio
-
+        remote = f'/Documents/{remote}'
         async def main() -> bool:
             async with self._documents_afc(app_id) as afc:
                 undeleted = await afc.rm(remote, force=True)
