@@ -7,9 +7,13 @@ from enum import Enum
 
 from idevice.device.android.device import AndroidDevice
 from idevice.device.base.device import DeviceBase
+from idevice.device.base.build import Build
+from idevice.device.base.prepare import Prepare
+from idevice.device.base.test import Test
 from idevice.device.ios.device import IOSDevice
 from idevice.device.ios3.device import IOSDevice3
 from idevice.device.windows.device import WindowsDevice
+from idevice.device.xc.device import XCDevice
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +25,7 @@ class Platform(Enum):
     IOS3 = "ios3"
     ANDROID = "android"
     WINDOWS = "windows"
+    XC = "xc"
 
     @classmethod
     def from_string(cls, platform: str) -> Platform:
@@ -32,7 +37,7 @@ class Platform(Enum):
 
 
 class Device:
-    """Factory facade that builds platform-specific :class:`DeviceBase` instances."""
+    """Factory facade that builds platform-specific device instances."""
 
     @classmethod
     def create(
@@ -41,31 +46,36 @@ class Device:
         *,
         device_id: str,
         device_ip: str,
-    ) -> DeviceBase:
+    ) -> DeviceBase | Prepare | Build | Test:
         """Create a device instance bound to ``device_id`` for ``platform``.
 
         Args:
-            platform: Target platform (``ios``, ``ios3``, ``android`` or
-                ``windows``), as a :class:`Platform` member or its string value.
-            device_id: Device id (UDID / serial). Required and non-empty.
+            platform: Target platform (``ios``, ``ios3``, ``android``,
+                ``windows`` or ``xc``), as a :class:`Platform` member or its
+                string value.
+            device_id: Device id (UDID / serial) or Xcode project path for
+                ``xc``. Required and non-empty.
             device_ip: Device IP address, or an empty string when not applicable.
 
         Returns:
-            DeviceBase: The platform-specific device implementation.
+            DeviceBase | Prepare | Build: The platform-specific device implementation.
 
         Raises:
             ValueError: If ``platform`` is unsupported or ``device_id`` is empty.
         """
         p = Platform.from_string(platform)
         logger.debug(f"Creating device for platform={p} device_id={device_id}")
-        if p  is Platform.IOS:
-            device: DeviceBase = IOSDevice(device_id, device_ip=device_ip)
+        device: DeviceBase | Prepare | Build | Test
+        if p is Platform.IOS:
+            device = IOSDevice(device_id, device_ip=device_ip)
         elif p is Platform.IOS3:
             device = IOSDevice3(device_id, device_ip=device_ip)
         elif p is Platform.ANDROID:
             device = AndroidDevice(device_id, device_ip=device_ip)
         elif p is Platform.WINDOWS:
             device = WindowsDevice(device_id, device_ip=device_ip)
+        elif p is Platform.XC:
+            device = XCDevice(device_id, device_ip=device_ip)
         else:
             raise ValueError(f"Unsupported platform: {platform}")
         logger.info(f"Created {type(device).__name__} for device_id={device.device_id}")

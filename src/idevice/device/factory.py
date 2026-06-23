@@ -18,6 +18,7 @@ from idevice.device.device import Platform
 from idevice.device.ios.device import IOSDevice
 from idevice.device.ios3.device import IOSDevice3
 from idevice.device.windows.device import WindowsDevice
+from idevice.device.xc.device import XCDevice
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,8 @@ def create_device(platform: Platform, **kwargs: Any) -> DeviceBase:
         device = AndroidDevice(**kwargs)
     elif platform is Platform.WINDOWS:
         device = WindowsDevice(**kwargs)
+    elif platform is Platform.XC:
+        device = XCDevice(**kwargs)
     else:
         raise ValueError(f"Unsupported platform: {platform}")
     logger.info(f"Created {type(device).__name__} for device_id={device.device_id}")

@@ -31,6 +31,11 @@ def powershell_binary() -> str:
     return os.environ.get("IDEVICE_POWERSHELL_BINARY", "powershell")
 
 
+def xcodebuild_binary() -> str:
+    """Return the xcodebuild CLI binary path."""
+    return os.environ.get("IDEVICE_XCODEBUILD_BINARY", "xcodebuild")
+
+
 def user_data_dir() -> Path:
     """Return the default directory for idevice user data."""
     return Path.home() / ".idevice"

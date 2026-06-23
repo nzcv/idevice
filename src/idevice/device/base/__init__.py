@@ -8,6 +8,8 @@ from idevice.device.base.errors import (
     DeviceNotFoundError,
 )
 from idevice.device.base.runner import CommandResult, SubprocessRunner
+from idevice.device.base.test import Test
+from idevice.device.base.testing_bundle import UpsertTestingBundle
 
 __all__ = [
     "AppNotInstalledError",
@@ -17,4 +19,6 @@ __all__ = [
     "DeviceNotFoundError",
     "DeviceBase",
     "SubprocessRunner",
+    "Test",
+    "UpsertTestingBundle",
 ]
