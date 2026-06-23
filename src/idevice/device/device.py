@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 class Platform(Enum):
     """Supported device platforms."""
 
-    IOS = "ios"
-    IOS3 = "ios3"
+    IOS = "_ios"
+    IOS3 = "ios"
     ANDROID = "android"
     WINDOWS = "windows"
 
