@@ -30,7 +30,7 @@ from pathlib import Path
 from idevice.device.android.device import AndroidDevice, AndroidDeviceError
 from idevice.device.base.errors import AppNotInstalledError
 from idevice.device.config import adb_binary
-from idevice.device.factory import Platform, create_device
+from idevice.device.device import Device
 
 DEFAULT_LAUNCH_PACKAGE = "com.android.settings"
 DEFAULT_REMOTE = "/sdcard/Download/idevice_android_example.txt"
@@ -240,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("Using device serial: %s", serial)
 
     try:
-        device = create_device(Platform.ANDROID, device_id=serial)
+        device = Device.create("android", device_id=serial, device_ip="")
     except AndroidDeviceError as exc:
         logger.error("%s", exc)
         return 1

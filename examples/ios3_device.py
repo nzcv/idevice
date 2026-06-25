@@ -34,7 +34,7 @@ from pathlib import Path
 
 from idevice.device.base.errors import AppNotInstalledError, CommandExecutionError
 from idevice.device.config import ios3_binary
-from idevice.device.factory import Platform, create_device
+from idevice.device.device import Device
 from idevice.device.ios3.device import IOSDevice3, IOSDevice3Error
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -326,7 +326,7 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("Using device UDID: %s", udid)
 
     try:
-        device = create_device(Platform.IOS3, device_id=udid)
+        device = Device.create("ios", device_id=udid, device_ip="")
     except IOSDevice3Error as exc:
         logger.error("%s", exc)
         return 1

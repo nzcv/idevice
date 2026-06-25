@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from idevice.device.base.errors import AppNotInstalledError, CommandExecutionError
-from idevice.device.factory import Platform, create_device
+from idevice.device.device import Device
 from idevice.device.ios3.device import IOSDevice3
 
 
@@ -43,7 +43,7 @@ pytestmark = pytest.mark.integration
 
 
 def test_factory_creates_ios3_device(ios3_udid: str) -> None:
-    device = create_device(Platform.IOS3, device_id=ios3_udid)
+    device = Device.create("ios", device_id=ios3_udid, device_ip="")
     assert isinstance(device, IOSDevice3)
     assert device.device_id == ios3_udid
 

@@ -107,7 +107,7 @@ Every platform implementation shares the same interface:
 - `swipe(x1, y1, x2, y2, duration_ms=300)` — touch gesture (Android implemented; iOS/Windows raise `NotImplementedError`)
 - `host_is_running()` — whether WebDriverAgent / UIAutomator2 host process is up
 
-Use `Device.create(Platform, device_id=…, device_ip="")` or construct `IOSDevice`, `IOSDevice3`, `AndroidDevice`, or `WindowsDevice` directly. (`create_device(...)` is still importable but deprecated.)
+Use `Device.create(Platform, device_id=…, device_ip="")` or construct `IOSDevice`, `IOSDevice3`, `AndroidDevice`, or `WindowsDevice` directly.
 
 ### `UIAutoBase`
 
