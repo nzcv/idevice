@@ -24,12 +24,32 @@ logger = logging.getLogger(__name__)
 _LOG_TAG = "[Host]"
 
 
-class Host:
+class _HostMeta(type):
+    """Metaclass exposing the singleton via the ``Host.Instance`` class property."""
+
+    @property
+    def Instance(cls) -> Host:
+        """Return the bound :class:`Host` singleton for quick access.
+
+        Raises:
+            RuntimeError: If no host has been constructed yet (call
+                :meth:`Host.create` / :meth:`Host.from_env` first).
+        """
+        if cls._instance is None:
+            raise RuntimeError(
+                f"{_LOG_TAG} no Host instance has been created yet; "
+                f"call Host.create(...) or Host.from_env() first"
+            )
+        return cls._instance
+
+
+class Host(metaclass=_HostMeta):
     """Drive a measurement run on one device via the keeper + on-device runner.
 
     ``Host`` is a process-wide singleton: the first construction binds the host
     to its keeper and device, and every subsequent ``Host(...)`` /
-    :meth:`create` / :meth:`from_env` call returns that same instance. Use
+    :meth:`create` / :meth:`from_env` call returns that same instance. Once
+    built, the singleton can be reached anywhere via :attr:`Host.Instance`. Use
     :meth:`reset` to drop the cached instance (mainly for tests).
     """
 
