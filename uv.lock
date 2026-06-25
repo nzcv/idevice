@@ -792,10 +792,12 @@ wheels = [
 
 [[package]]
 name = "idevice"
-version = "0.4.2"
+version = "0.4.4"
 source = { editable = "." }
 dependencies = [
     { name = "pymobiledevice3" },
+    { name = "requests", version = "2.32.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "requests", version = "2.34.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "uiautomator2" },
 ]
 
@@ -818,6 +820,7 @@ requires-dist = [
     { name = "pymobiledevice3", specifier = ">=9.15.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.14" },
+    { name = "requests", specifier = ">=2.32.5" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9" },
     { name = "uiautomator2", specifier = ">=3.5.2" },
 ]
