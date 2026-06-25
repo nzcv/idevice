@@ -1,8 +1,10 @@
 # host
 
 The `host` module is the Python client side of the keeper measurement workflow. It
-runs **only on the mac host** (other platforms are unsupported); a test script
-(e.g. `autoscript.py`) uses it to drive a memory-measurement run on an iOS device.
+runs **only on the mac host**; a test script (e.g. `autoscript.py`) uses it to drive
+a memory-measurement run on an iOS device. On every other platform the factory
+returns a no-op `DummyHost` (health is always `False`, all operations are inert
+placeholders) so the controller can drive any platform without special-casing.
 
 ## Architecture
 
@@ -38,7 +40,8 @@ Mirrors the `device/` module:
 - `host/base/keeper.py` — `Keeper` control-server HTTP client.
 - `host/base/runner.py` — `Runner` on-device HTTP client.
 - `host/base/errors.py` — `HostError` hierarchy.
-- `host/mac/host.py` — `MacHost(HostBase)` concrete orchestrator.
+- `host/mac/host.py` — `MacHost(HostBase)` concrete orchestrator (macOS only).
+- `host/dummy/host.py` — `DummyHost(HostBase)` no-op used on non-macOS platforms.
 
 ## Environment variables
 
@@ -46,6 +49,7 @@ The controller (`controller/src/worker/engine.rs`) injects these into each subta
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
+| `GAUTO_PLATFORM` | `macos` | Controller platform; non-`macos` yields a `DummyHost` |
 | `GAUTO_HOST_IP` | – | Keeper control-server IP, e.g. `192.168.1.7` |
 | `GAUTO_HOST_ID` | – | Keeper/controller id, e.g. `14` (informational) |
 | `GAUTO_HOST_PORT` | `18000` | Keeper control-server port |

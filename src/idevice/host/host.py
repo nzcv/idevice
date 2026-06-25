@@ -6,31 +6,30 @@ import logging
 from enum import Enum
 
 from idevice.host import config
-from idevice.host.base.errors import HostNotSupportedError
 from idevice.host.base.host import HostBase
+from idevice.host.dummy.host import DummyHost
 from idevice.host.mac.host import MacHost
 
 logger = logging.getLogger(__name__)
 
 
 class Platform(Enum):
-    """Supported host platforms (keeper runs on macOS only)."""
+    """Host platforms the controller can run on.
+
+    Only :attr:`MACOS` runs the keeper-backed :class:`~idevice.host.mac.host.MacHost`;
+    every other platform resolves to a no-op
+    :class:`~idevice.host.dummy.host.DummyHost`.
+    """
 
     MACOS = "macos"
+    IOS = "ios"
+    ANDROID = "android"
+    WINDOWS = "windows"
 
     @classmethod
-    def from_string(cls, platform: str) -> Platform:
-        """Convert a string to a :class:`Platform`.
-
-        Raises:
-            HostNotSupportedError: If ``platform`` is not a supported host platform.
-        """
-        try:
-            return cls(platform.lower())
-        except ValueError as exc:
-            raise HostNotSupportedError(
-                f"Host feature is only supported on macOS, not: {platform}"
-            ) from exc
+    def is_macos(cls, platform: str) -> bool:
+        """Return ``True`` when ``platform`` is the keeper-backed macOS host."""
+        return platform.lower() == cls.MACOS.value
 
 
 class Host:
@@ -49,8 +48,13 @@ class Host:
     ) -> HostBase:
         """Create a host instance bound to a keeper and a device.
 
+        The keeper-backed workflow only runs on macOS, so ``macos`` builds a
+        :class:`~idevice.host.mac.host.MacHost`. Every other platform builds a
+        no-op :class:`~idevice.host.dummy.host.DummyHost` instead of raising.
+
         Args:
-            platform: Target platform; only ``macos`` is supported.
+            platform: Target platform (``macos`` runs the keeper; anything else
+                resolves to a dummy host).
             keeper_ip: Keeper control-server IP.
             device_udid: Target device UDID.
             device_ip: Target device IP.
@@ -59,13 +63,9 @@ class Host:
 
         Returns:
             HostBase: The platform-specific host implementation.
-
-        Raises:
-            HostNotSupportedError: If ``platform`` is unsupported.
         """
-        p = Platform.from_string(platform)
-        logger.debug(f"Creating host for platform={p} device_udid={device_udid}")
-        if p is Platform.MACOS:
+        logger.debug(f"Creating host for platform={platform} device_udid={device_udid}")
+        if Platform.is_macos(platform):
             host: HostBase = MacHost(
                 keeper_ip=keeper_ip,
                 keeper_port=keeper_port,
@@ -73,23 +73,33 @@ class Host:
                 device_ip=device_ip,
                 keeper_id=keeper_id,
             )
-        else:  # pragma: no cover - Platform.from_string already guards this
-            raise HostNotSupportedError(f"Unsupported host platform: {platform}")
+        else:
+            host = DummyHost(
+                keeper_ip=keeper_ip,
+                keeper_port=keeper_port,
+                device_udid=device_udid,
+                device_ip=device_ip,
+                platform=platform.lower(),
+                keeper_id=keeper_id,
+            )
         logger.info(f"Created {type(host).__name__} for device_udid={host.device_udid}")
         return host
 
     @classmethod
     def from_env(cls) -> HostBase:
-        """Build a :class:`MacHost` from the ``GAUTO_*`` environment variables.
+        """Build a host from the ``GAUTO_*`` environment variables.
 
-        Reads keeper and device configuration injected by the controller (see
-        ``controller/src/worker/engine.rs``) via :mod:`idevice.host.config`.
+        Reads the platform (``GAUTO_PLATFORM``) plus keeper and device
+        configuration injected by the controller (see
+        ``controller/src/worker/engine.rs``) via :mod:`idevice.host.config`. A
+        ``macos`` platform yields a :class:`~idevice.host.mac.host.MacHost`;
+        every other platform yields a :class:`~idevice.host.dummy.host.DummyHost`.
 
         Returns:
             HostBase: A host bound to the environment-provided keeper and device.
         """
         return cls.create(
-            Platform.MACOS.value,
+            config.host_platform(),
             keeper_ip=config.keeper_ip(),
             keeper_port=config.keeper_port(),
             device_udid=config.device_udid(),

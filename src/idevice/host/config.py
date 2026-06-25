@@ -15,6 +15,16 @@ DEFAULT_HTTP_TIMEOUT = 15.0
 DEFAULT_READY_TIMEOUT = 300.0
 
 
+def host_platform() -> str:
+    """Return the controller platform (``GAUTO_PLATFORM``).
+
+    The controller (``controller/src/worker/engine.rs``) injects one of
+    ``android`` | ``ios`` | ``windows`` | ``macos``. Only ``macos`` runs the
+    keeper-backed host; every other value resolves to a dummy host.
+    """
+    return os.environ.get("GAUTO_PLATFORM", "macos")
+
+
 def keeper_ip() -> str:
     """Return the EndlessKeeper control-server IP (``GAUTO_HOST_IP``)."""
     return os.environ.get("GAUTO_HOST_IP", "")

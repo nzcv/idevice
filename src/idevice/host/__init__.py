@@ -16,10 +16,12 @@ from idevice.host.base.errors import (
 from idevice.host.base.host import HostBase
 from idevice.host.base.keeper import Keeper
 from idevice.host.base.runner import Runner
+from idevice.host.dummy.host import DummyHost
 from idevice.host.host import Host, Platform
 from idevice.host.mac.host import MacHost
 
 __all__ = [
+    "DummyHost",
     "Host",
     "HostBase",
     "HostError",
