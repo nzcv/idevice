@@ -20,9 +20,12 @@ test script (idevice.host.Host)
    |
    '-- Runner  --> RemoteControlTest runner (iOS device, :18100)
                      GET /api/health
-                     GET /api/startMeasuring?bundleId=...
-                     GET /api/stopMeasuring
-                     /api/launch, /api/activate, /api/terminate, /api/screenshot, /api/exit
+                     GET /api/measuring/start?bundleId=...
+                     GET /api/measuring/period/{seconds}?bundleId=...
+                     GET /api/measuring/stop
+                     GET /api/measuring/status
+                     /api/launch, /api/activate, /api/terminate,
+                     /api/screenshot, /api/screenshot/start, /api/screenshot/stop, /api/exit
 ```
 
 start/stop measuring is **not** proxied by the keeper: the runner embeds its own
@@ -32,16 +35,14 @@ falling back to `GAUTO_DEVICE_SERVER_PORT` (default `18100`).
 
 ## Module layout
 
-Mirrors the `device/` module:
+A single flat package:
 
-- `host/host.py` — `Platform` enum + `Host.create(...)` / `Host.from_env()` factory.
+- `host/host.py` — `Host` orchestrator (macOS) + no-op `DummyHost`, plus the
+  `Host.create(...)` / `Host.from_env()` factory (`macos` → `Host`, else `DummyHost`).
 - `host/config.py` — env-based config accessors.
-- `host/base/host.py` — `HostBase` (ABC) orchestrator interface.
-- `host/base/keeper.py` — `Keeper` control-server HTTP client.
-- `host/base/runner.py` — `Runner` on-device HTTP client.
-- `host/base/errors.py` — `HostError` hierarchy.
-- `host/mac/host.py` — `MacHost(HostBase)` concrete orchestrator (macOS only).
-- `host/dummy/host.py` — `DummyHost(HostBase)` no-op used on non-macOS platforms.
+- `host/keeper.py` — `Keeper` control-server HTTP client.
+- `host/runner.py` — `Runner` on-device HTTP client.
+- `host/errors.py` — `HostError` hierarchy.
 
 ## Environment variables
 

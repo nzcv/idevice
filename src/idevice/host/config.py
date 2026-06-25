@@ -1,4 +1,4 @@
-"""Environment-based configuration for ``HostBase`` implementations.
+"""Environment-based configuration for the host orchestrator.
 
 The controller (``controller/src/worker/engine.rs``) injects ``GAUTO_HOST_*`` and
 ``GAUTO_DEVICE_*`` variables into each subtask process; these accessors read them
@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import os
 
-DEFAULT_KEEPER_PORT = 18000
+DEFAULT_KEEPER_PORT = 18200
 DEFAULT_RUNNER_PORT = 18100
-DEFAULT_HTTP_TIMEOUT = 15.0
+DEFAULT_HTTP_TIMEOUT = 60.0
 DEFAULT_READY_TIMEOUT = 300.0
 
 
@@ -70,3 +70,7 @@ def ready_timeout() -> float:
     """Return the runner readiness timeout in seconds (``IDEVICE_HOST_READY_TIMEOUT``)."""
     raw = os.environ.get("IDEVICE_HOST_READY_TIMEOUT")
     return float(raw) if raw else DEFAULT_READY_TIMEOUT
+
+def bundle_id() -> str:
+    """Return the bundle id (``GAUTO_BUNDLE_ID``)."""
+    return os.environ.get("GAUTO_BUNDLE_ID", "")

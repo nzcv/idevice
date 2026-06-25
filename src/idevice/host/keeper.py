@@ -11,7 +11,7 @@ import logging
 import requests
 
 from idevice.host import config
-from idevice.host.base.errors import KeeperError
+from idevice.host.errors import KeeperError
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,7 @@ class Keeper:
         self._port = int(port)
         self._timeout = timeout if timeout is not None else config.http_timeout()
         self.base = f"http://{ip}:{port}"
+        logger.info(f"{_LOG_TAG} Keeper initialized: {self.base}")
 
     def _request(
         self,

@@ -13,6 +13,7 @@ from pathlib import Path
 from idevice.device.base.device import DeviceBase
 from idevice.device.base.errors import AppNotInstalledError, DeviceNotFoundError
 from idevice.device.base.runner import SubprocessRunner
+from idevice.device.cache import InstalledAppCache
 from idevice.device.config import adb_binary
 
 logger = logging.getLogger(__name__)
@@ -35,17 +36,23 @@ class AndroidDevice(DeviceBase):
 
     DEFAULT_BINARY = "adb"
 
-    def __init__(self, device_id: str, *, device_ip: str = "") -> None:
+    def __init__(
+        self,
+        device_id: str,
+        *,
+        device_ip: str = "",
+        cache_dir: Path | None = None,
+    ) -> None:
         super().__init__(device_id, device_ip, platform="android")
         self._binary = self.DEFAULT_BINARY
         self._runner = SubprocessRunner()
+        self._app_cache = InstalledAppCache(device_id, cache_dir=cache_dir)
         if shutil.which(self._binary) is None:
             logger.error(f"[AndroidDevice] `{self._binary}` CLI not found on PATH")
             raise AndroidDeviceError(
                 f"`{self._binary}` CLI not found on PATH. "
                 "Install adb: https://developer.android.com/studio/releases/platform-tools"
             )
-        self._installed_pkg_names: dict[str, str] = {}
 
     @classmethod
     def default_udid(cls) -> str:
@@ -95,7 +102,7 @@ class AndroidDevice(DeviceBase):
             raise AndroidDeviceError(f"Package install failed on {self.device_id}: {exc}") from exc
 
         if app_id:
-            self._installed_pkg_names[app_id] = package_path.name
+            self._app_cache.add(app_id, package_path)
             logger.debug(f"[AndroidDevice] Cached package name for app_id={app_id}")
         return True
 
@@ -104,7 +111,7 @@ class AndroidDevice(DeviceBase):
         command = self._base_command()
         command.extend(["uninstall", app_id])
         self._runner.run(command)
-        self._installed_pkg_names.pop(app_id, None)
+        self._app_cache.remove(app_id)
 
     def is_installed(self, app_id: str) -> bool:
         command = self._base_command()
@@ -146,7 +153,8 @@ class AndroidDevice(DeviceBase):
     def get_installed_pkg_name(self, app_id: str) -> str | None:
         if not self.is_installed(app_id):
             return None
-        return self._installed_pkg_names.get(app_id)
+        cached = self._app_cache.get(app_id)
+        return cached.name if cached else None
 
     def host_is_running(self) -> bool:
         return True

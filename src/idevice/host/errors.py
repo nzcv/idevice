@@ -1,14 +1,14 @@
-"""Exceptions raised by ``HostBase`` implementations and host clients."""
+"""Exceptions raised by the host orchestrator and its HTTP clients."""
 
 from __future__ import annotations
 
 
 class HostError(Exception):
-    """Base exception for ``HostBase`` and host client classes."""
+    """Base exception for the host and its clients."""
 
 
 class HostNotSupportedError(HostError):
-    """Raised when the host feature is requested on an unsupported platform."""
+    """Raised when a host feature is requested on an unsupported platform."""
 
 
 class HostTimeoutError(HostError):

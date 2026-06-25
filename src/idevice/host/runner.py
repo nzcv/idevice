@@ -13,7 +13,7 @@ from pathlib import Path
 import requests
 
 from idevice.host import config
-from idevice.host.base.errors import RunnerError
+from idevice.host.errors import RunnerError
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,7 @@ class Runner:
         self._port = int(port)
         self._timeout = timeout if timeout is not None else config.http_timeout()
         self.base = f"http://{ip}:{port}"
+        logger.info(f"{_LOG_TAG} Runner initialized: {self.base}")
 
     def _get(self, route: str, *, params: dict | None = None, timeout: float | None = None) -> requests.Response:
         url = f"{self.base}{route}"
@@ -92,24 +93,52 @@ class Runner:
         return self._json(self._get("/api/terminate", params={"bundleId": bundle_id}))
 
     def start_measuring(self, bundle_id: str) -> dict:
-        """Open an ``XCTMemoryMetric`` window on ``bundle_id`` (``/api/startMeasuring``)."""
+        """Open an ``XCTMemoryMetric`` window on ``bundle_id`` (``/api/measuring/start``)."""
         if not bundle_id:
             raise ValueError("bundle_id is required and must be a non-empty string")
-        return self._json(self._get("/api/startMeasuring", params={"bundleId": bundle_id}))
+        return self._json(self._get("/api/measuring/start", params={"bundleId": bundle_id}))
 
     def stop_measuring(self) -> dict:
-        """Close the measured window (``/api/stopMeasuring``)."""
-        return self._json(self._get("/api/stopMeasuring"))
+        """Close the measured window (``/api/measuring/stop``)."""
+        return self._json(self._get("/api/measuring/stop"))
+
+    def measuring_status(self) -> dict:
+        """Report the current measuring state (``/api/measuring/status``).
+
+        The server's ``state`` walks through ``idle`` (before any measurement),
+        ``started`` (while a window is open), and ``stopped`` (after one closes).
+        """
+        return self._json(self._get("/api/measuring/status"))
 
     def dt_measuring(self, seconds: int, bundle_id: str) -> dict:
-        """Open a measured window that auto-closes after ``seconds`` (``/api/dtMeasuring/{seconds}``)."""
+        """Open a measured window that auto-closes after ``seconds`` (``/api/measuring/period/{seconds}``)."""
         if seconds <= 0:
             raise ValueError("seconds must be positive")
         if not bundle_id:
             raise ValueError("bundle_id is required and must be a non-empty string")
         return self._json(
-            self._get(f"/api/dtMeasuring/{seconds}", params={"bundleId": bundle_id})
+            self._get(f"/api/measuring/period/{seconds}", params={"bundleId": bundle_id})
         )
+
+    def start_periodic_screenshots(
+        self, interval: float = 1.0, limit: int | None = None
+    ) -> dict:
+        """Begin periodic screenshots (``/api/screenshot/start``).
+
+        Args:
+            interval: Seconds between captures (server default ``1``).
+            limit: Stop after this many captures; ``None`` / ``0`` is unlimited.
+        """
+        if interval <= 0:
+            raise ValueError("interval must be positive")
+        params: dict = {"interval": interval}
+        if limit:
+            params["limit"] = limit
+        return self._json(self._get("/api/screenshot/start", params=params))
+
+    def stop_periodic_screenshots(self) -> dict:
+        """Stop periodic screenshots (``/api/screenshot/stop``)."""
+        return self._json(self._get("/api/screenshot/stop"))
 
     def screenshot(self, dest_path: Path | str) -> Path:
         """Capture one screenshot and write it to ``dest_path`` (``/api/screenshot``).
