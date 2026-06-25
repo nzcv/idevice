@@ -26,5 +26,7 @@ $Windows.~WS/
 
 # tests_real
 tests_real/
-ios3.py
 *.ipa
+
+# tmp/
+tmp/
