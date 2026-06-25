@@ -33,9 +33,9 @@ class Host:
     :meth:`reset` to drop the cached instance (mainly for tests).
     """
 
-    _instance: "Host | None" = None
+    _instance: Host | None = None
 
-    def __new__(cls, *args, **kwargs) -> "Host":  # noqa: D102 - singleton wiring
+    def __new__(cls, *args, **kwargs) -> Host:  # noqa: D102 - singleton wiring
         del args, kwargs
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -102,7 +102,7 @@ class Host:
         keeper_port: int = config.DEFAULT_KEEPER_PORT,
         keeper_id: str = "",
         bundle_id: str,
-    ) -> "Host | DummyHost":
+    ) -> Host | DummyHost:
         """Build a host for ``platform``: ``macos`` -> :class:`Host`, else :class:`DummyHost`."""
         logger.debug(f"{_LOG_TAG} create platform={platform} device_udid={device_udid}")
         if platform.lower() == "macos":
@@ -125,7 +125,7 @@ class Host:
         )
 
     @classmethod
-    def from_env(cls) -> "Host | DummyHost":
+    def from_env(cls) -> Host | DummyHost:
         """Build a host from the ``GAUTO_*`` environment variables."""
         return cls.create(
             platform=config.host_platform(),
