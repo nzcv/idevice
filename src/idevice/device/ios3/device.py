@@ -125,13 +125,16 @@ class IOSDevice3(DeviceBase):
         logger.info(f"{_LOG_TAG} Launching app on iOS device {self.device_id}: {app_id}")
         cmd = self._command("developer", "dvt", "launch", app_id)
         self._runner.run(cmd)
-
+    
     def stop_app(self, app_id: str) -> None:
         if not app_id:
             raise ValueError("app_id is required and must be a non-empty string")
-        logger.info(f"{_LOG_TAG} Stopping app on iOS device {self.device_id}: {app_id}")
-        cmd = self._command("developer", "dvt", "pkill", "--bundle", app_id)
-        self._runner.run(cmd)
+        try:
+            logger.info(f"{_LOG_TAG} Stopping app on iOS device {self.device_id}: {app_id}")
+            cmd = self._command("developer", "dvt", "pkill", "--bundle", app_id)
+            self._runner.run(cmd)
+        except Exception as e:
+            logger.error(f"{_LOG_TAG} Failed to stop app {app_id} on {self.device_id}: {e}")
 
     def get_installed_pkg_name(self, app_id: str) -> str | None:
         if not self.is_installed(app_id):
