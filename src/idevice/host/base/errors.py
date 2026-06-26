@@ -1,4 +1,4 @@
-"""Exceptions raised by the host orchestrator and its HTTP clients."""
+"""Exceptions raised by ``HostBase`` implementations and their HTTP clients."""
 
 from __future__ import annotations
 

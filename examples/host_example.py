@@ -40,8 +40,7 @@ import json
 import logging
 import sys
 
-from idevice.host import Host, HostError, HostTimeoutError, config
-from idevice.host.host import DummyHost
+from idevice.host import Host, HostBase, HostError, HostTimeoutError, config
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +48,7 @@ DEFAULT_BUNDLE_ID = "com.rm42.TrashDash"
 DEFAULT_CAPTURE_TIMEOUT_S = 60.0
 
 
-def _build_host(args: argparse.Namespace) -> Host | DummyHost:
+def _build_host(args: argparse.Namespace) -> HostBase:
     """Construct a host from ``--from-env`` or explicit flags."""
     if args.from_env:
         logger.info("Building host from GAUTO_* environment")
@@ -65,14 +64,12 @@ def _build_host(args: argparse.Namespace) -> Host | DummyHost:
     )
 
 
-def _kill_host(host: Host | DummyHost) -> dict:
+def _kill_host(host: HostBase) -> dict:
     """Tear down the keeper run for ``host``."""
-    if isinstance(host, Host):
-        return host._kill()
     return host.kill()
 
 
-def _demo_health(host: Host | DummyHost) -> bool:
+def _demo_health(host: HostBase) -> bool:
     """Probe keeper reachability."""
     logger.info("Probing keeper at %s:%s", host.keeper_ip, host.keeper_port)
     healthy = host.health()
@@ -80,7 +77,7 @@ def _demo_health(host: Host | DummyHost) -> bool:
     return healthy
 
 
-def _demo_capture(host: Host | DummyHost, args: argparse.Namespace) -> dict:
+def _demo_capture(host: HostBase, args: argparse.Namespace) -> dict:
     """Run launch_app -> capture_memgraph -> (export) in one shot."""
     logger.info(
         "Capturing memgraph for %s on device %s",
@@ -97,7 +94,7 @@ def _demo_capture(host: Host | DummyHost, args: argparse.Namespace) -> dict:
     return summary
 
 
-def _demo_steps(host: Host | DummyHost, args: argparse.Namespace) -> None:
+def _demo_steps(host: HostBase, args: argparse.Namespace) -> None:
     """Drive each step explicitly so failures localize to a single call."""
     logger.info("Launching app %s on %s", args.bundle_id, host.device_udid)
     launch_result = host.launch_app(timeout=args.ready_timeout)

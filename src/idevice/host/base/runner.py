@@ -13,7 +13,7 @@ from pathlib import Path
 import requests
 
 from idevice.host import config
-from idevice.host.errors import RunnerError
+from idevice.host.base.errors import RunnerError
 
 logger = logging.getLogger(__name__)
 

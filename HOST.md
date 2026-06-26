@@ -35,14 +35,19 @@ falling back to `GAUTO_DEVICE_SERVER_PORT` (default `18100`).
 
 ## Module layout
 
-A single flat package:
+A layered package mirroring `idevice.device`: a thin factory, an abstract base
+with shared infrastructure, and one subpackage per platform implementation.
 
-- `host/host.py` — `Host` orchestrator (macOS) + no-op `DummyHost`, plus the
-  `Host.create(...)` / `Host.from_env()` factory (`macos` → `Host`, else `DummyHost`).
+- `host/host.py` — `Host` factory + `Platform` enum + `_HostMeta` singleton
+  accessor. `Host.create(...)` / `Host.from_env()` return a `HostBase`
+  (`macos` → `MacOSHost`, every other platform → `DummyHost`).
 - `host/config.py` — env-based config accessors.
-- `host/keeper.py` — `Keeper` control-server HTTP client.
-- `host/runner.py` — `Runner` on-device HTTP client.
-- `host/errors.py` — `HostError` hierarchy.
+- `host/base/host.py` — `HostBase` abstract base class (the orchestration API).
+- `host/base/keeper.py` — `Keeper` control-server HTTP client.
+- `host/base/runner.py` — `Runner` on-device HTTP client.
+- `host/base/errors.py` — `HostError` hierarchy.
+- `host/macos/host.py` — `MacOSHost(HostBase)`, the real keeper-backed host.
+- `host/dummy/host.py` — `DummyHost(HostBase)`, the no-op fallback.
 
 ## Environment variables
 
@@ -67,30 +72,32 @@ Build a host from the environment and run the full measurement workflow:
 ```python
 from idevice.host import Host
 
-host = Host.from_env()  # reads GAUTO_HOST_* / GAUTO_DEVICE_*
-summary = host.measure("com.rm42.TrashDash", duration_s=60, export_url=presigned_url)
+host = Host.from_env()  # reads GAUTO_PLATFORM / GAUTO_HOST_* / GAUTO_DEVICE_* / GAUTO_BUNDLE_ID
+host.launch_app()                   # ensure a fresh runner, then launch the app
+result = host.capture_memgraph(timeout=60)
+host.export(presigned_url)          # POST /api/runs/{udid}/export
+host.kill()                         # DELETE /api/runs/{udid}
 ```
 
-Or construct explicitly and drive each step:
+Or construct explicitly:
 
 ```python
 from idevice.host import Host
 
 host = Host.create(
-    "macos",
+    platform="macos",
     keeper_ip="192.168.1.7",
     device_udid="00008120-00123D323",
     device_ip="192.168.1.5",
+    bundle_id="com.rm42.TrashDash",
 )
 
-host.launch()                       # POST /api/runs
-host.wait_until_ready()             # poll the on-device runner
-host.start_measuring("com.rm42.TrashDash")
-# ... exercise the app ...
-host.stop_measuring()
+host.launch_app()                   # POST /api/runs, wait ready, launch app
+host.capture_memgraph(timeout=60)   # open a measured window and wait for it
 host.export(presigned_url)          # POST /api/runs/{udid}/export
 host.kill()                         # DELETE /api/runs/{udid}
 ```
 
 The thin clients are also available directly via `host.keeper` and `host.runner()`.
+The most recently built host is reachable anywhere via `Host.Instance`.
 ```

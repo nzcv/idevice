@@ -11,7 +11,7 @@ import logging
 import requests
 
 from idevice.host import config
-from idevice.host.errors import KeeperError
+from idevice.host.base.errors import KeeperError
 
 logger = logging.getLogger(__name__)
 
