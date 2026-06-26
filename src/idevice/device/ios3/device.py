@@ -69,6 +69,12 @@ class IOSDevice3(DeviceBase):
         logger.info(f"{_LOG_TAG} Installing package on iOS device {self.device_id}: {package_path}")
         if not package_path.exists():
             raise FileNotFoundError(f"Package not found: {package_path}")
+        
+        try:
+            self.uninstall(app_id)  # Uninstall first to avoid conflicts
+        except AppNotInstalledError:
+            logger.info(f"{_LOG_TAG} App {app_id} not installed")
+        
         cmd = self._command("apps", "install", str(package_path))
         result = self._runner.run(cmd, timeout=3600)
         if result.returncode != 0:
@@ -87,7 +93,7 @@ class IOSDevice3(DeviceBase):
     def is_installed(self, app_id: str) -> bool:
         cmd = self._command("apps", "list", "--type", "User")
         result = self._runner.run(cmd)
-        logger.debug(f"{_LOG_TAG} apps list output: {result.stdout}")
+        # logger.debug(f"{_LOG_TAG} apps list output: {result.stdout}")
         installed = self._bundle_id_in_apps_output(result.stdout, app_id)
         logger.info(f"{_LOG_TAG} {app_id} installed on {self.device_id}: {installed}")
         return installed
