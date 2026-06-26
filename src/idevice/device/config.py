@@ -34,3 +34,22 @@ def powershell_binary() -> str:
 def user_data_dir() -> Path:
     """Return the default directory for idevice user data."""
     return Path.home() / ".idevice"
+
+
+def platform() -> str:
+    """Return the target device platform (``GAUTO_PLATFORM``).
+
+    The controller (``controller/src/worker/engine.rs``) injects one of
+    ``android`` | ``ios`` | ``windows`` | ``macos``.
+    """
+    return os.environ.get("GAUTO_PLATFORM", "")
+
+
+def device_id() -> str:
+    """Return the target device id / UDID (``GAUTO_DEVICE_UDID``)."""
+    return os.environ.get("GAUTO_DEVICE_UDID", "")
+
+
+def device_ip() -> str:
+    """Return the target device IP (``GAUTO_DEVICE_IP``)."""
+    return os.environ.get("GAUTO_DEVICE_IP", "")
