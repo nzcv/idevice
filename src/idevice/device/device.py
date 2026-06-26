@@ -8,6 +8,7 @@ from enum import Enum
 from idevice.device import config
 from idevice.device.android.device import AndroidDevice
 from idevice.device.base.device import DeviceBase
+from idevice.device.dummy.device import DummyDevice
 from idevice.device.ios.device import IOSDevice
 from idevice.device.ios3.device import IOSDevice3
 from idevice.device.windows.device import WindowsDevice
@@ -39,7 +40,11 @@ class _DeviceMeta(type):
 
     @property
     def Instance(cls) -> DeviceBase:
-        """Return the most recently built :class:`DeviceBase` for quick access.
+        """Return the most recently built device for quick access.
+
+        The instance is a real :class:`DeviceBase` when one was built, or a
+        no-op :class:`DummyDevice` when :meth:`Device.from_env` could not bind a
+        device (every :class:`DummyDevice` operation logs an error and returns).
 
         Raises:
             RuntimeError: If no device has been built yet (call
@@ -112,14 +117,52 @@ class Device(metaclass=_DeviceMeta):
 
         Reads ``GAUTO_PLATFORM``, ``GAUTO_DEVICE_UDID`` and ``GAUTO_DEVICE_IP``.
 
-        Returns:
-            DeviceBase: The platform-specific device implementation.
+        Unlike :meth:`create`, this never raises on a missing/blank environment:
+        when ``GAUTO_PLATFORM`` or ``GAUTO_DEVICE_UDID`` is empty (or the
+        platform is unsupported) it logs the reason and returns a no-op
+        :class:`DummyDevice`. ``GAUTO_DEVICE_IP`` may be empty because not all
+        platforms use it. The result (real or dummy) is bound as
+        :attr:`Device.Instance`, so callers can always reach it there.
 
-        Raises:
-            ValueError: If the platform is unsupported or ``device_id`` is empty.
+        Returns:
+            DeviceBase: The platform-specific device, or a no-op
+            :class:`DummyDevice` whose every operation logs an error and returns
+            an inert default.
         """
-        return cls.create(
-            platform=config.platform(),
-            device_id=config.device_id(),
-            device_ip=config.device_ip(),
+        platform = config.platform()
+        device_id = config.device_id()
+        device_ip = config.device_ip()
+
+        missing = [
+            name
+            for name, value in (
+                ("GAUTO_PLATFORM", platform),
+                ("GAUTO_DEVICE_UDID", device_id),
+            )
+            if not value
+        ]
+        if missing:
+            reason = f"missing/blank env var(s): {', '.join(missing)}"
+            return cls._bind_dummy(reason, platform, device_id, device_ip)
+
+        try:
+            return cls.create(
+                platform=platform,
+                device_id=device_id,
+                device_ip=device_ip,
+            )
+        except ValueError as exc:
+            return cls._bind_dummy(
+                f"invalid env configuration: {exc}", platform, device_id, device_ip
+            )
+
+    @classmethod
+    def _bind_dummy(
+        cls, reason: str, platform: str, device_id: str, device_ip: str
+    ) -> DeviceBase:
+        """Bind a no-op :class:`DummyDevice` as the current instance and return it."""
+        device = DummyDevice(
+            reason, platform=platform, device_id=device_id, device_ip=device_ip
         )
+        cls._instance = device
+        return device
