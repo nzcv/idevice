@@ -366,11 +366,20 @@ class IOSDevice3(DeviceBase):
             raise ValueError("remote is required and must be a non-empty string")
         import asyncio
         import os
+        import posixpath
         remote = f'/Documents/{remote}'
         async def main() -> bool:
             async with self._documents_afc(app_id) as afc:
                 if not os.path.exists(local):
                     return False
+                # pymobiledevice3 only auto-creates parent directories when the
+                # source is a directory. For single-file pushes it requires the
+                # remote parent to already exist, otherwise it re-raises
+                # AfcFileNotFoundError. Ensure the parent directory exists first.
+                if os.path.isfile(local):
+                    remote_parent = posixpath.dirname(remote)
+                    if remote_parent:
+                        await afc.makedirs(remote_parent)
                 await afc.push(local, remote)
                 return True
 
