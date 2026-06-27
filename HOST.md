@@ -11,27 +11,31 @@ placeholders) so the controller can drive any platform without special-casing.
 ```
 test script (idevice.host.Host)
    |
-   |-- Keeper  --> EndlessKeeper control server (mac host, :18000)
-   |                 POST   /api/runs                 launch an xctest run
-   |                 GET    /api/runs                 list runs
-   |                 GET    /api/runs/{udid}          run status (echoes server_port)
-   |                 DELETE /api/runs/{udid}          kill a run
-   |                 POST   /api/runs/{udid}/export   export memgraphs -> presigned PUT
-   |
-   '-- Runner  --> RemoteControlTest runner (iOS device, :18100)
-                     GET /api/health
-                     GET /api/measuring/start?bundleId=...
-                     GET /api/measuring/period/{seconds}?bundleId=...
-                     GET /api/measuring/stop
-                     GET /api/measuring/status
-                     /api/launch, /api/activate, /api/terminate,
-                     /api/screenshot, /api/screenshot/start, /api/screenshot/stop, /api/exit
+   '-- Keeper  --> EndlessKeeper control server (mac host, :18000)
+                     POST   /api/runs                 launch an xctest run
+                     GET    /api/runs                 list runs
+                     GET    /api/runs/{udid}          run status (echoes server_port)
+                     GET    /api/runs/{udid}/launch   launch a run + the app (?ip=&bundleId=)
+                     DELETE /api/runs/{udid}          kill a run
+                     POST   /api/runs/{udid}/export   export memgraphs -> presigned PUT
+                     ANY    /api/runs/{udid}/proxy/{*path}  forward to the on-device runner
+                       |
+                       '--> RemoteControlTest runner (iOS device, :18100)
+                              GET /api/health
+                              GET /api/measuring/start?bundleId=...
+                              GET /api/measuring/period/{seconds}?bundleId=...
+                              GET /api/measuring/stop
+                              GET /api/measuring/status
+                              /api/launch, /api/activate, /api/terminate,
+                              /api/screenshot, /api/screenshot/start, /api/screenshot/stop, /api/exit
 ```
 
-start/stop measuring is **not** proxied by the keeper: the runner embeds its own
-HTTP server on the device, so the host talks to `http://{device-ip}:{port}`
-directly. The runner port is taken from the keeper launch/status `server_port`,
-falling back to `GAUTO_DEVICE_SERVER_PORT` (default `18100`).
+The host **only** talks to the keeper. Runner calls go through the keeper's
+runner proxy (`/api/runs/{udid}/proxy/...`), which forwards them to the
+on-device runner at `http://{device_host}:{server_port}`. The host supplies the
+device IP as `device_host` at launch, and the keeper owns the on-device runner
+port (its `--device-server-port` default, `GAUTO_DEVICE_SERVER_PORT` on the
+controller side).
 
 ## Module layout
 
@@ -44,7 +48,8 @@ with shared infrastructure, and one subpackage per platform implementation.
 - `host/config.py` — env-based config accessors.
 - `host/base/host.py` — `HostBase` abstract base class (the orchestration API).
 - `host/base/keeper.py` — `Keeper` control-server HTTP client.
-- `host/base/runner.py` — `Runner` on-device HTTP client.
+- `host/base/runner.py` — `Runner` HTTP client that reaches the on-device
+  runner through the keeper proxy.
 - `host/base/errors.py` — `HostError` hierarchy.
 - `host/mac/host.py` — `MacHost(HostBase)`, the real keeper-backed host.
 - `host/dummy/host.py` — `DummyHost(HostBase)`, the no-op fallback.
@@ -59,9 +64,9 @@ The controller (`controller/src/worker/engine.rs`) injects these into each subta
 | `GAUTO_HOST_IP` | – | Keeper control-server IP, e.g. `192.168.1.7` |
 | `GAUTO_HOST_ID` | – | Keeper/controller id, e.g. `14` (informational) |
 | `GAUTO_HOST_PORT` | `18000` | Keeper control-server port |
-| `GAUTO_DEVICE_IP` | – | Target device IP, e.g. `192.168.1.5` |
+| `GAUTO_DEVICE_IP` | – | Target device IP, e.g. `192.168.1.5`; sent to the keeper as `device_host` so it can proxy the runner |
 | `GAUTO_DEVICE_UDID` | – | Target device UDID, e.g. `00008120-00123D323` |
-| `GAUTO_DEVICE_SERVER_PORT` | `18100` | On-device runner port (fallback) |
+| `GAUTO_DEVICE_SERVER_PORT` | `18100` | On-device runner port; owned by the keeper, no longer dialed by the host |
 | `IDEVICE_HOST_TIMEOUT` | `15` | Per-request HTTP timeout (seconds) |
 | `IDEVICE_HOST_READY_TIMEOUT` | `300` | `wait_until_ready` timeout (seconds) |
 

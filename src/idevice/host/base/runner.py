@@ -1,8 +1,10 @@
-"""HTTP client for the on-device RemoteControlTest runner.
+"""HTTP client for the RemoteControlTest runner, reached via the keeper proxy.
 
 The runner embeds a small HTTP server on the iOS device (see
-``RemoteControlTest/README.md``). The host talks to it directly at
-``http://{device-ip}:{port}`` for app control, screenshots, and measurement.
+``RemoteControlTest/README.md``). The host never dials the device directly:
+requests are sent to the EndlessKeeper control server's runner proxy
+(``/api/runs/{udid}/proxy``), which forwards them to the on-device runner for
+app control, screenshots, and measurement.
 """
 
 from __future__ import annotations
@@ -21,26 +23,30 @@ _LOG_TAG = "[Runner]"
 
 
 class Runner:
-    """Thin client for the runner's embedded HTTP server on the iOS device."""
+    """Thin client for the runner, reached through the keeper proxy.
 
-    def __init__(self, ip: str, port: int, *, timeout: float | None = None) -> None:
-        """Bind the client to an on-device runner server.
+    The ``base_url`` points at the keeper's runner proxy prefix
+    (e.g. ``http://{keeper-ip}:{port}/api/runs/{udid}/proxy``). Route paths such
+    as ``/api/health`` are appended verbatim and forwarded by the keeper to the
+    on-device runner.
+    """
+
+    def __init__(self, base_url: str, *, timeout: float | None = None) -> None:
+        """Bind the client to the keeper's runner proxy.
 
         Args:
-            ip: Device IP address. Required and non-empty.
-            port: Runner server port.
+            base_url: Keeper runner-proxy prefix. Required and non-empty;
+                a trailing slash is stripped.
             timeout: Per-request timeout in seconds; defaults to
                 :func:`idevice.host.config.http_timeout`.
 
         Raises:
-            ValueError: If ``ip`` is empty.
+            ValueError: If ``base_url`` is empty.
         """
-        if not ip:
-            raise ValueError("device ip is required and must be a non-empty string")
-        self._ip = ip
-        self._port = int(port)
+        if not base_url:
+            raise ValueError("base_url is required and must be a non-empty string")
         self._timeout = timeout if timeout is not None else config.http_timeout()
-        self.base = f"http://{ip}:{port}"
+        self.base = base_url.rstrip("/")
         logger.info(f"{_LOG_TAG} Runner initialized: {self.base}")
 
     def _get(self, route: str, *, params: dict | None = None, timeout: float | None = None) -> requests.Response:
