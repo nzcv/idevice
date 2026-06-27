@@ -1,7 +1,7 @@
 """Public ``Host`` entry point for keeper-backed measurement orchestration.
 
 Use :meth:`Host.create` / :meth:`Host.from_env` to build a host: ``macos``
-yields a real :class:`~idevice.host.macos.host.MacOSHost`; every other platform
+yields a real :class:`~idevice.host.mac.host.MacHost`; every other platform
 yields a no-op :class:`~idevice.host.dummy.host.DummyHost` so the controller can
 drive any platform without special-casing it.
 """
@@ -14,7 +14,7 @@ from enum import Enum
 from idevice.host import config
 from idevice.host.base.host import HostBase
 from idevice.host.dummy.host import DummyHost
-from idevice.host.macos.host import MacOSHost
+from idevice.host.mac.host import MacHost
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class _HostMeta(type):
     def Instance(cls) -> HostBase:
         """Return the most recently built host for quick access.
 
-        The instance is a real :class:`~idevice.host.macos.host.MacOSHost` when
+        The instance is a real :class:`~idevice.host.mac.host.MacHost` when
         one was built, or a no-op :class:`~idevice.host.dummy.host.DummyHost`
         when :meth:`Host.from_env` could not bind a host.
 
@@ -110,7 +110,7 @@ class Host(metaclass=_HostMeta):
         p = Platform.from_string(platform)
         logger.debug(f"{_LOG_TAG} create platform={p} device_udid={device_udid}")
         if p is Platform.MACOS:
-            host: HostBase = MacOSHost(
+            host: HostBase = MacHost(
                 platform=platform,
                 keeper_ip=keeper_ip,
                 keeper_port=keeper_port,

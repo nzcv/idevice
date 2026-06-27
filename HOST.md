@@ -40,13 +40,13 @@ with shared infrastructure, and one subpackage per platform implementation.
 
 - `host/host.py` — `Host` factory + `Platform` enum + `_HostMeta` singleton
   accessor. `Host.create(...)` / `Host.from_env()` return a `HostBase`
-  (`macos` → `MacOSHost`, every other platform → `DummyHost`).
+  (`macos` → `MacHost`, every other platform → `DummyHost`).
 - `host/config.py` — env-based config accessors.
 - `host/base/host.py` — `HostBase` abstract base class (the orchestration API).
 - `host/base/keeper.py` — `Keeper` control-server HTTP client.
 - `host/base/runner.py` — `Runner` on-device HTTP client.
 - `host/base/errors.py` — `HostError` hierarchy.
-- `host/macos/host.py` — `MacOSHost(HostBase)`, the real keeper-backed host.
+- `host/mac/host.py` — `MacHost(HostBase)`, the real keeper-backed host.
 - `host/dummy/host.py` — `DummyHost(HostBase)`, the no-op fallback.
 
 ## Environment variables

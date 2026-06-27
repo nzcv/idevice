@@ -3,7 +3,7 @@
 The host drives a measurement run on the **mac host**: it talks to the
 EndlessKeeper control server (:class:`Keeper`) and the on-device
 RemoteControlTest runner (:class:`Runner`). Build one with :meth:`Host.create`
-/ :meth:`Host.from_env`: ``macos`` yields a real :class:`MacOSHost`; every other
+/ :meth:`Host.from_env`: ``macos`` yields a real :class:`MacHost`; every other
 platform yields a no-op :class:`~idevice.host.dummy.host.DummyHost`.
 """
 
@@ -19,7 +19,7 @@ from idevice.host.base.host import HostBase
 from idevice.host.base.keeper import Keeper
 from idevice.host.base.runner import Runner
 from idevice.host.host import Host, Platform
-from idevice.host.macos.host import MacOSHost
+from idevice.host.mac.host import MacHost
 
 __all__ = [
     "Host",
@@ -29,7 +29,7 @@ __all__ = [
     "HostTimeoutError",
     "Keeper",
     "KeeperError",
-    "MacOSHost",
+    "MacHost",
     "Platform",
     "Runner",
     "RunnerError",

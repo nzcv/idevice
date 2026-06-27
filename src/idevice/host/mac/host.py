@@ -1,6 +1,6 @@
 """macOS keeper-backed :class:`HostBase` implementation.
 
-Runs on the **mac host**: :class:`MacOSHost` drives a run end to end via the
+Runs on the **mac host**: :class:`MacHost` drives a run end to end via the
 EndlessKeeper control server (:class:`~idevice.host.base.keeper.Keeper`) and the
 on-device RemoteControlTest runner (:class:`~idevice.host.base.runner.Runner`).
 """
@@ -18,10 +18,10 @@ from idevice.host.base.runner import Runner
 
 logger = logging.getLogger(__name__)
 
-_LOG_TAG = "[MacOSHost]"
+_LOG_TAG = "[MacHost]"
 
 
-class MacOSHost(HostBase):
+class MacHost(HostBase):
     """Drive a measurement run on one device via the keeper + on-device runner."""
 
     def __init__(
@@ -54,15 +54,15 @@ class MacOSHost(HostBase):
         self._runner: Runner | None = None
 
     @classmethod
-    def from_env(cls) -> MacOSHost:
-        """Build a :class:`MacOSHost` from the ``GAUTO_*`` environment variables.
+    def from_env(cls) -> MacHost:
+        """Build a :class:`MacHost` from the ``GAUTO_*`` environment variables.
 
         Reads ``GAUTO_PLATFORM``, ``GAUTO_HOST_IP``, ``GAUTO_HOST_PORT``,
         ``GAUTO_HOST_ID``, ``GAUTO_DEVICE_UDID``, ``GAUTO_DEVICE_IP`` and
         ``GAUTO_BUNDLE_ID``.
 
         Returns:
-            MacOSHost: A host bound to the keeper/device described by the
+            MacHost: A host bound to the keeper/device described by the
             environment.
 
         Raises:
