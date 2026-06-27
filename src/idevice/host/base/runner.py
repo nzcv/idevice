@@ -77,7 +77,15 @@ class Runner:
         return payload if isinstance(payload, dict) else {"data": payload}
 
     def health(self) -> dict:
-        """Liveness probe (``GET /api/health``)."""
+        """Liveness probe (``GET /api/health``).
+
+        The runner returns ``200`` with ``{"status": "ok"}`` only once its
+        main-thread command loop is ready. While it is still coming up it
+        returns ``503`` with ``{"status": "not_ready", "reason": ...}`` where
+        ``reason`` is the runner phase (``notStarted`` before the loop starts,
+        ``initializing`` during prompt acceptance / backgrounding); ``_get``
+        surfaces that ``503`` as a :class:`RunnerError`.
+        """
         return self._json(self._get("/api/health"))
 
     def launch_app(self, bundle_id: str) -> dict:
