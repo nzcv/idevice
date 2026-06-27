@@ -20,7 +20,7 @@ class HostBase(ABC):
 
     def __init__(
         self,
-        platform: str,
+        host_type: str,
         *,
         keeper_ip: str,
         keeper_port: int = config.DEFAULT_KEEPER_PORT,
@@ -32,7 +32,7 @@ class HostBase(ABC):
         """Bind the host to a keeper control server and a target device.
 
         Args:
-            platform: Platform identifier (e.g. ``macos``).
+            host_type: Host type identifier (e.g. ``macos``).
             keeper_ip: EndlessKeeper control-server IP. Required and non-empty.
             keeper_port: Keeper control-server port.
             device_udid: Target device UDID. Required and non-empty.
@@ -52,7 +52,7 @@ class HostBase(ABC):
             raise ValueError("device_ip is required and must be a non-empty string")
         if not bundle_id:
             raise ValueError("bundle_id is required and must be a non-empty string")
-        self._platform = platform
+        self._host_type = host_type
         self._keeper_ip = keeper_ip
         self._keeper_port = int(keeper_port)
         self._device_udid = device_udid
@@ -61,9 +61,9 @@ class HostBase(ABC):
         self._keeper_id = keeper_id
 
     @property
-    def platform(self) -> str:
-        """Platform bound to this instance."""
-        return self._platform
+    def host_type(self) -> str:
+        """Host type bound to this instance."""
+        return self._host_type
 
     @property
     def keeper_ip(self) -> str:

@@ -26,7 +26,7 @@ class MacHost(HostBase):
 
     def __init__(
         self,
-        platform: str = "macos",
+        host_type: str = "macos",
         *,
         keeper_ip: str,
         keeper_port: int = config.DEFAULT_KEEPER_PORT,
@@ -42,7 +42,7 @@ class MacHost(HostBase):
                 ``bundle_id`` is empty.
         """
         super().__init__(
-            platform,
+            host_type,
             keeper_ip=keeper_ip,
             keeper_port=keeper_port,
             device_udid=device_udid,
@@ -70,7 +70,7 @@ class MacHost(HostBase):
                 ``GAUTO_DEVICE_IP`` or ``GAUTO_BUNDLE_ID`` is empty.
         """
         return cls(
-            platform=config.host_platform(),
+            host_type=config.host_type(),
             keeper_ip=config.keeper_ip(),
             keeper_port=config.keeper_port(),
             keeper_id=config.keeper_id(),

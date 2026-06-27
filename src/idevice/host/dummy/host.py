@@ -18,10 +18,10 @@ class DummyHost(HostBase):
     """No-op :class:`HostBase` returned when no real host can be bound.
 
     :meth:`idevice.host.host.Host.from_env` / :meth:`~idevice.host.host.Host.create`
-    build this for non-macOS platforms or when a required ``GAUTO_*`` variable is
-    missing/blank, so the controller can drive any platform without special-casing
+    build this for non-macOS host types or when a required ``GAUTO_*`` variable is
+    missing/blank, so the controller can drive any host type without special-casing
     an unconfigured environment. ``keeper_ip`` / ``device_udid`` / ``device_ip`` /
-    ``bundle_id`` / ``platform`` expose whatever (possibly empty) values were read
+    ``bundle_id`` / ``host_type`` expose whatever (possibly empty) values were read
     from the environment; every host *operation* reports itself unhealthy and
     returns an inert placeholder result instead of raising.
     """
@@ -35,7 +35,7 @@ class DummyHost(HostBase):
         device_udid: str = "",
         device_ip: str = "",
         bundle_id: str = "",
-        platform: str = "dummy",
+        host_type: str = "dummy",
         keeper_id: str = "",
     ) -> None:
         """Bind a no-op host without the strict coordinate validation.
@@ -46,7 +46,7 @@ class DummyHost(HostBase):
         ``super().__init__``.
         """
         self._reason = reason
-        self._platform = platform
+        self._host_type = host_type
         self._keeper_ip = keeper_ip
         self._keeper_port = int(keeper_port)
         self._device_udid = device_udid
@@ -61,11 +61,11 @@ class DummyHost(HostBase):
     def _noop(self, operation: str) -> dict:
         """Log that ``operation`` was ignored because no host is bound."""
         logger.warning(
-            f"{_LOG_TAG} `{operation}` is a no-op on platform={self.platform}: {self._reason}"
+            f"{_LOG_TAG} `{operation}` is a no-op on host_type={self.host_type}: {self._reason}"
         )
         return {
             "status": "dummy",
-            "platform": self.platform,
+            "host_type": self.host_type,
             "device_udid": self.device_udid,
             "operation": operation,
         }
@@ -75,7 +75,7 @@ class DummyHost(HostBase):
 
     def runner(self) -> Runner:
         raise HostNotSupportedError(
-            f"{_LOG_TAG} no on-device runner is available on platform={self.platform}"
+            f"{_LOG_TAG} no on-device runner is available on host_type={self.host_type}"
         )
 
     def launch_app(

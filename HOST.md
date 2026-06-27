@@ -40,11 +40,11 @@ controller side).
 ## Module layout
 
 A layered package mirroring `idevice.device`: a thin factory, an abstract base
-with shared infrastructure, and one subpackage per platform implementation.
+with shared infrastructure, and one subpackage per host-type implementation.
 
-- `host/host.py` — `Host` factory + `Platform` enum + `_HostMeta` singleton
+- `host/host.py` — `Host` factory + `HostType` enum + `_HostMeta` singleton
   accessor. `Host.create(...)` / `Host.from_env()` return a `HostBase`
-  (`macos` → `MacHost`, every other platform → `DummyHost`).
+  (`macos` → `MacHost`, every other host type → `DummyHost`).
 - `host/config.py` — env-based config accessors.
 - `host/base/host.py` — `HostBase` abstract base class (the orchestration API).
 - `host/base/keeper.py` — `Keeper` control-server HTTP client.
@@ -90,7 +90,7 @@ Or construct explicitly:
 from idevice.host import Host
 
 host = Host.create(
-    platform="macos",
+    host_type="macos",
     keeper_ip="192.168.1.7",
     device_udid="00008120-00123D323",
     device_ip="192.168.1.5",

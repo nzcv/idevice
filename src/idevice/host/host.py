@@ -1,9 +1,9 @@
 """Public ``Host`` entry point for keeper-backed measurement orchestration.
 
 Use :meth:`Host.create` / :meth:`Host.from_env` to build a host: ``macos``
-yields a real :class:`~idevice.host.mac.host.MacHost`; every other platform
+yields a real :class:`~idevice.host.mac.host.MacHost`; every other host type
 yields a no-op :class:`~idevice.host.dummy.host.DummyHost` so the controller can
-drive any platform without special-casing it.
+drive any host type without special-casing it.
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 _LOG_TAG = "[Host]"
 
 
-class Platform(Enum):
-    """Supported host platforms."""
+class HostType(Enum):
+    """Supported host types."""
 
     MACOS = "macos"
     IOS = "ios"
@@ -30,12 +30,12 @@ class Platform(Enum):
     WINDOWS = "windows"
 
     @classmethod
-    def from_string(cls, platform: str) -> Platform:
-        """Convert a string to a Platform enum value."""
+    def from_string(cls, host_type: str) -> HostType:
+        """Convert a string to a HostType enum value."""
         try:
-            return cls(platform.lower())  # type: ignore
+            return cls(host_type.lower())  # type: ignore
         except ValueError:
-            raise ValueError(f"Invalid platform: {platform}") from ValueError
+            raise ValueError(f"Invalid host type: {host_type}") from ValueError
 
 
 class _HostMeta(type):
@@ -62,7 +62,7 @@ class _HostMeta(type):
 
 
 class Host(metaclass=_HostMeta):
-    """Build a platform-specific :class:`HostBase` and expose it as a singleton.
+    """Build a host-type-specific :class:`HostBase` and expose it as a singleton.
 
     The most recently built host is cached and reachable anywhere via
     :attr:`Host.Instance`. Use :meth:`reset` to drop the cached instance
@@ -80,7 +80,7 @@ class Host(metaclass=_HostMeta):
     def create(
         cls,
         *,
-        platform: str,
+        host_type: str,
         keeper_ip: str,
         device_udid: str,
         device_ip: str,
@@ -88,10 +88,10 @@ class Host(metaclass=_HostMeta):
         keeper_id: str = "",
         bundle_id: str,
     ) -> HostBase:
-        """Build a host for ``platform``: ``macos`` -> real host, else dummy.
+        """Build a host for ``host_type``: ``macos`` -> real host, else dummy.
 
         Args:
-            platform: Target platform (``macos`` runs the keeper-backed host;
+            host_type: Target host type (``macos`` runs the keeper-backed host;
                 every other value resolves to a :class:`DummyHost`).
             keeper_ip: EndlessKeeper control-server IP.
             device_udid: Target device UDID.
@@ -101,17 +101,17 @@ class Host(metaclass=_HostMeta):
             bundle_id: Target app bundle identifier.
 
         Returns:
-            HostBase: The platform-specific host implementation.
+            HostBase: The host-type-specific host implementation.
 
         Raises:
-            ValueError: If ``platform`` is unsupported, or (for ``macos``) a
+            ValueError: If ``host_type`` is unsupported, or (for ``macos``) a
                 required coordinate is empty.
         """
-        p = Platform.from_string(platform)
-        logger.debug(f"{_LOG_TAG} create platform={p} device_udid={device_udid}")
-        if p is Platform.MACOS:
+        h = HostType.from_string(host_type)
+        logger.debug(f"{_LOG_TAG} create host_type={h} device_udid={device_udid}")
+        if h is HostType.MACOS:
             host: HostBase = MacHost(
-                platform=platform,
+                host_type=host_type,
                 keeper_ip=keeper_ip,
                 keeper_port=keeper_port,
                 keeper_id=keeper_id,
@@ -121,8 +121,8 @@ class Host(metaclass=_HostMeta):
             )
         else:
             host = DummyHost(
-                f"unsupported platform: {platform}",
-                platform=p.value,
+                f"unsupported host type: {host_type}",
+                host_type=h.value,
                 keeper_ip=keeper_ip,
                 keeper_port=keeper_port,
                 device_udid=device_udid,
@@ -143,16 +143,16 @@ class Host(metaclass=_HostMeta):
         ``GAUTO_BUNDLE_ID``.
 
         Unlike :meth:`create`, this never raises on a missing/blank environment:
-        a non-macOS platform, an unsupported platform, or a missing required
+        a non-macOS host type, an unsupported host type, or a missing required
         coordinate logs the reason and returns a no-op :class:`DummyHost`. The
         result (real or dummy) is bound as :attr:`Host.Instance`, so callers can
         always reach it there.
 
         Returns:
-            HostBase: The platform-specific host, or a no-op :class:`DummyHost`
+            HostBase: The host-type-specific host, or a no-op :class:`DummyHost`
             whose every operation reports unhealthy and returns an inert default.
         """
-        platform = config.host_platform()
+        host_type = config.host_type()
         keeper_ip = config.keeper_ip()
         keeper_port = config.keeper_port()
         keeper_id = config.keeper_id()
@@ -161,17 +161,17 @@ class Host(metaclass=_HostMeta):
         bundle_id = config.bundle_id()
 
         try:
-            p = Platform.from_string(platform)
+            h = HostType.from_string(host_type)
         except ValueError:
             return cls._bind_dummy(
-                f"invalid platform: {platform!r}",
-                platform, keeper_ip, keeper_port, device_udid, device_ip, bundle_id, keeper_id,
+                f"invalid host type: {host_type!r}",
+                host_type, keeper_ip, keeper_port, device_udid, device_ip, bundle_id, keeper_id,
             )
 
-        if p is not Platform.MACOS:
+        if h is not HostType.MACOS:
             return cls._bind_dummy(
-                f"unsupported platform: {platform}",
-                platform, keeper_ip, keeper_port, device_udid, device_ip, bundle_id, keeper_id,
+                f"unsupported host type: {host_type}",
+                host_type, keeper_ip, keeper_port, device_udid, device_ip, bundle_id, keeper_id,
             )
 
         missing = [
@@ -187,12 +187,12 @@ class Host(metaclass=_HostMeta):
         if missing:
             return cls._bind_dummy(
                 f"missing/blank env var(s): {', '.join(missing)}",
-                platform, keeper_ip, keeper_port, device_udid, device_ip, bundle_id, keeper_id,
+                host_type, keeper_ip, keeper_port, device_udid, device_ip, bundle_id, keeper_id,
             )
 
         try:
             return cls.create(
-                platform=platform,
+                host_type=host_type,
                 keeper_ip=keeper_ip,
                 keeper_port=keeper_port,
                 keeper_id=keeper_id,
@@ -203,14 +203,14 @@ class Host(metaclass=_HostMeta):
         except ValueError as exc:
             return cls._bind_dummy(
                 f"invalid env configuration: {exc}",
-                platform, keeper_ip, keeper_port, device_udid, device_ip, bundle_id, keeper_id,
+                host_type, keeper_ip, keeper_port, device_udid, device_ip, bundle_id, keeper_id,
             )
 
     @classmethod
     def _bind_dummy(
         cls,
         reason: str,
-        platform: str,
+        host_type: str,
         keeper_ip: str,
         keeper_port: int,
         device_udid: str,
@@ -221,7 +221,7 @@ class Host(metaclass=_HostMeta):
         """Bind a no-op :class:`DummyHost` as the current instance and return it."""
         host = DummyHost(
             reason,
-            platform=platform,
+            host_type=host_type,
             keeper_ip=keeper_ip,
             keeper_port=keeper_port,
             device_udid=device_udid,

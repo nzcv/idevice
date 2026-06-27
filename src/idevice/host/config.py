@@ -15,8 +15,8 @@ DEFAULT_HTTP_TIMEOUT = 60.0
 DEFAULT_READY_TIMEOUT = 300.0
 
 
-def host_platform() -> str:
-    """Return the controller platform (``GAUTO_HOST_TYPE``).
+def host_type() -> str:
+    """Return the host type (``GAUTO_HOST_TYPE``).
 
     The controller (``controller/src/worker/engine.rs``) injects one of
     ``android`` | ``ios`` | ``windows`` | ``macos``. Only ``macos`` runs the

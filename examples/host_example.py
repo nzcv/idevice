@@ -54,7 +54,7 @@ def _build_host(args: argparse.Namespace) -> HostBase:
         logger.info("Building host from GAUTO_* environment")
         return Host.from_env()
     return Host.create(
-        platform="macos",
+        host_type="macos",
         keeper_ip=args.keeper_ip,
         keeper_port=args.keeper_port,
         device_udid=args.device_udid,
