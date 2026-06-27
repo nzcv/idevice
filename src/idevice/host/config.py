@@ -16,13 +16,13 @@ DEFAULT_READY_TIMEOUT = 300.0
 
 
 def host_platform() -> str:
-    """Return the controller platform (``GAUTO_PLATFORM``).
+    """Return the controller platform (``GAUTO_HOST_TYPE``).
 
     The controller (``controller/src/worker/engine.rs``) injects one of
     ``android`` | ``ios`` | ``windows`` | ``macos``. Only ``macos`` runs the
     keeper-backed host; every other value resolves to a dummy host.
     """
-    return os.environ.get("GAUTO_PLATFORM", "macos")
+    return os.environ.get("GAUTO_HOST_TYPE", "")
 
 
 def keeper_ip() -> str:

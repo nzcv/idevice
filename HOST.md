@@ -60,7 +60,7 @@ The controller (`controller/src/worker/engine.rs`) injects these into each subta
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `GAUTO_PLATFORM` | `macos` | Controller platform; non-`macos` yields a `DummyHost` |
+| `GAUTO_HOST_TYPE` | – | Host OS (`macos` \| `ios` \| `android` \| `windows`); non-`macos` yields a `DummyHost` |
 | `GAUTO_HOST_IP` | – | Keeper control-server IP, e.g. `192.168.1.7` |
 | `GAUTO_HOST_ID` | – | Keeper/controller id, e.g. `14` (informational) |
 | `GAUTO_HOST_PORT` | `18000` | Keeper control-server port |
@@ -77,7 +77,7 @@ Build a host from the environment and run the full measurement workflow:
 ```python
 from idevice.host import Host
 
-host = Host.from_env()  # reads GAUTO_PLATFORM / GAUTO_HOST_* / GAUTO_DEVICE_* / GAUTO_BUNDLE_ID
+host = Host.from_env()  # reads GAUTO_HOST_TYPE / GAUTO_HOST_* / GAUTO_DEVICE_* / GAUTO_BUNDLE_ID
 host.launch_app()                   # GET /api/runs/{udid}/launch: run + app in one call
 result = host.capture_memgraph(timeout=60)
 host.export()                       # POST /api/runs/{udid}/export -> {... "download_url": ...}

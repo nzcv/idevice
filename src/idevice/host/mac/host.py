@@ -57,7 +57,7 @@ class MacHost(HostBase):
     def from_env(cls) -> MacHost:
         """Build a :class:`MacHost` from the ``GAUTO_*`` environment variables.
 
-        Reads ``GAUTO_PLATFORM``, ``GAUTO_HOST_IP``, ``GAUTO_HOST_PORT``,
+        Reads ``GAUTO_HOST_TYPE``, ``GAUTO_HOST_IP``, ``GAUTO_HOST_PORT``,
         ``GAUTO_HOST_ID``, ``GAUTO_DEVICE_UDID``, ``GAUTO_DEVICE_IP`` and
         ``GAUTO_BUNDLE_ID``.
 

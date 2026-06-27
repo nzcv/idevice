@@ -138,7 +138,7 @@ class Host(metaclass=_HostMeta):
     def from_env(cls) -> HostBase:
         """Build a host from the ``GAUTO_*`` environment variables.
 
-        Reads ``GAUTO_PLATFORM``, ``GAUTO_HOST_IP``, ``GAUTO_HOST_PORT``,
+        Reads ``GAUTO_HOST_TYPE``, ``GAUTO_HOST_IP``, ``GAUTO_HOST_PORT``,
         ``GAUTO_HOST_ID``, ``GAUTO_DEVICE_UDID``, ``GAUTO_DEVICE_IP`` and
         ``GAUTO_BUNDLE_ID``.
 
