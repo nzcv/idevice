@@ -90,8 +90,7 @@ class DummyHost(HostBase):
         del timeout
         return self._noop("capture_memgraph")
 
-    def export(self, presigned_url: str, content_type: str | None = None) -> dict:
-        del presigned_url, content_type
+    def export(self) -> dict:
         return self._noop("export")
 
     def status(self) -> dict:

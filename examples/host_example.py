@@ -4,7 +4,8 @@
 The host runs on the **mac host** and drives a run end to end: it launches the
 xctest run via the EndlessKeeper control server, waits for the on-device
 RemoteControlTest runner to come up, launches the target app, captures a
-memgraph, and optionally exports the captured memory graphs to a presigned URL.
+memgraph, and optionally exports the captured memory graphs (the keeper presigns
+and uploads the archive itself, returning the download URL).
 
 Prerequisites:
     - macOS host with the EndlessKeeper control server reachable (default :18000)
@@ -24,10 +25,9 @@ Examples:
         --device-ip 192.168.1.5 \\
         --bundle-id com.rm42.TrashDash --steps
 
-    # Capture and export the memgraphs to a presigned PUT URL
+    # Capture and export the memgraphs (keeper presigns + uploads)
     uv run python examples/host_example.py --from-env \\
-        --bundle-id com.rm42.TrashDash \\
-        --export-url "https://bucket.s3.amazonaws.com/...&X-Amz-Signature=..."
+        --bundle-id com.rm42.TrashDash --export
 
     # Health probe only (keeper reachability), verbose logging
     uv run python examples/host_example.py --from-env --health-only -v
@@ -87,9 +87,9 @@ def _demo_capture(host: HostBase, args: argparse.Namespace) -> dict:
     host.launch_app(timeout=args.ready_timeout)
     result = host.capture_memgraph(timeout=args.capture_timeout)
     summary = {"capture": result}
-    if args.export_url:
-        logger.info("Exporting memgraphs to presigned URL")
-        summary["export"] = host.export(args.export_url, args.content_type)
+    if args.export:
+        logger.info("Exporting memgraphs (keeper presigns + uploads)")
+        summary["export"] = host.export()
     logger.info("Measurement summary:\n%s", json.dumps(summary, indent=2, default=str))
     return summary
 
@@ -104,9 +104,9 @@ def _demo_steps(host: HostBase, args: argparse.Namespace) -> None:
     capture_result = host.capture_memgraph(timeout=args.capture_timeout)
     logger.info("Capture result:\n%s", json.dumps(capture_result, indent=2, default=str))
 
-    if args.export_url:
-        logger.info("Exporting memgraphs to presigned URL")
-        result = host.export(args.export_url, args.content_type)
+    if args.export:
+        logger.info("Exporting memgraphs (keeper presigns + uploads)")
+        result = host.export()
         logger.info("Export result:\n%s", json.dumps(result, indent=2, default=str))
 
 
@@ -168,12 +168,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     run.add_argument(
-        "--export-url",
-        help="Optional presigned PUT URL to export the captured memgraphs to",
-    )
-    run.add_argument(
-        "--content-type",
-        help="Optional content type the --export-url was signed for",
+        "--export",
+        action="store_true",
+        help="Export the captured memgraphs (keeper presigns + uploads the archive)",
     )
 
     mode = parser.add_argument_group("mode")

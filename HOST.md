@@ -17,7 +17,7 @@ test script (idevice.host.Host)
                      GET    /api/runs/{udid}          run status (echoes server_port)
                      GET    /api/runs/{udid}/launch   launch a run + the app (?ip=&bundleId=)
                      DELETE /api/runs/{udid}          kill a run
-                     POST   /api/runs/{udid}/export   export memgraphs -> presigned PUT
+                     POST   /api/runs/{udid}/export   export memgraphs -> keeper presigns + uploads
                      ANY    /api/runs/{udid}/proxy/{*path}  forward to the on-device runner
                        |
                        '--> RemoteControlTest runner (iOS device, :18100)
@@ -80,7 +80,7 @@ from idevice.host import Host
 host = Host.from_env()  # reads GAUTO_PLATFORM / GAUTO_HOST_* / GAUTO_DEVICE_* / GAUTO_BUNDLE_ID
 host.launch_app()                   # GET /api/runs/{udid}/launch: run + app in one call
 result = host.capture_memgraph(timeout=60)
-host.export(presigned_url)          # POST /api/runs/{udid}/export
+host.export()                       # POST /api/runs/{udid}/export -> {... "download_url": ...}
 host.kill()                         # DELETE /api/runs/{udid}
 ```
 
@@ -99,7 +99,7 @@ host = Host.create(
 
 host.launch_app()                   # GET /api/runs/{udid}/launch: run + app in one call
 host.capture_memgraph(timeout=60)   # open a measured window and wait for it
-host.export(presigned_url)          # POST /api/runs/{udid}/export
+host.export()                       # POST /api/runs/{udid}/export -> {... "download_url": ...}
 host.kill()                         # DELETE /api/runs/{udid}
 ```
 

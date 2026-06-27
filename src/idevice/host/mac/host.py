@@ -151,10 +151,10 @@ class MacHost(HostBase):
         logger.info(f"{_LOG_TAG} killing run for {self.device_udid}")
         return self.keeper.kill(self.device_udid)
 
-    def export(self, presigned_url: str, content_type: str | None = None) -> dict:
-        """Export the run's memgraphs to a presigned URL via the keeper."""
+    def export(self) -> dict:
+        """Export the run's memgraphs via the keeper (keeper presigns + uploads)."""
         logger.info(f"{_LOG_TAG} exporting run for {self.device_udid}")
-        return self.keeper.export(self.device_udid, presigned_url, content_type)
+        return self.keeper.export(self.device_udid)
 
     def capture_memgraph(self, timeout: float = 60.0) -> dict:
         """Open a measured window that auto-closes after ``5 seconds``."""

@@ -169,28 +169,26 @@ class Keeper:
         result = self._request("DELETE", f"/api/runs/{device_udid}")
         return result if isinstance(result, dict) else {}
 
-    def export(self, device_udid: str, presigned_url: str, content_type: str | None = None) -> dict:
-        """Export memgraphs to a presigned URL (``POST /api/runs/{udid}/export``).
+    def export(self, device_udid: str) -> dict:
+        """Export memgraphs (``POST /api/runs/{udid}/export``).
+
+        The keeper presigns the upload itself, uploads the archive, and signs it
+        with its own content type (``application/x-xz``), so callers pass nothing
+        beyond the device.
 
         Args:
             device_udid: Target device UDID / run key.
-            presigned_url: S3 presigned PUT URL the archive is uploaded to.
-            content_type: Optional content type the URL was signed for.
 
         Returns:
-            dict: The export summary.
+            dict: The export summary, including the ``download_url`` of the
+            uploaded archive.
         """
         if not device_udid:
             raise ValueError("device_udid is required and must be a non-empty string")
-        if not presigned_url:
-            raise ValueError("presigned_url is required and must be a non-empty string")
-        payload: dict = {"presigned_url": presigned_url}
-        if content_type:
-            payload["content_type"] = content_type
         result = self._request(
             "POST",
             f"/api/runs/{device_udid}/export",
-            json_body=payload,
+            json_body={},
             timeout=max(self._timeout, 600.0),
         )
         return result if isinstance(result, dict) else {}

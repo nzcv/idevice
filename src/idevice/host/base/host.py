@@ -146,15 +146,15 @@ class HostBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def export(self, presigned_url: str, content_type: str | None = None) -> dict:
-        """Export the run's memgraphs to a presigned URL via the keeper.
+    def export(self) -> dict:
+        """Export the run's memgraphs via the keeper.
 
-        Args:
-            presigned_url: S3 presigned PUT URL the archive is uploaded to.
-            content_type: Optional content type the URL was signed for.
+        The keeper presigns the upload destination, uploads the archive, and
+        signs it with its own content type, so callers supply nothing.
 
         Returns:
-            dict: The export summary.
+            dict: The export summary, including the uploaded archive's
+            ``download_url``.
         """
         raise NotImplementedError
 
