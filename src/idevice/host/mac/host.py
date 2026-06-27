@@ -11,7 +11,7 @@ import logging
 import time
 
 from idevice.host import config
-from idevice.host.base.errors import HostTimeoutError, KeeperError
+from idevice.host.base.errors import HostTimeoutError
 from idevice.host.base.host import HostBase
 from idevice.host.base.keeper import Keeper
 from idevice.host.base.runner import Runner
@@ -23,10 +23,6 @@ _LOG_TAG = "[MacHost]"
 
 class MacHost(HostBase):
     """Drive a measurement run on one device via the keeper + on-device runner."""
-
-    #: Keeper run states that still own the device; a relaunch must wait for
-    #: these to finish before ``POST /api/runs`` will succeed.
-    _ACTIVE_RUN_STATES = frozenset({"pending", "building", "running"})
 
     def __init__(
         self,
@@ -105,187 +101,46 @@ class MacHost(HostBase):
             return False
         return True
 
-    def _launch_runner(
-        self,
-        *,
-        deadline: float | None = None,
-        interval: float = 2.0,
-        **overrides,
-    ) -> dict:
-        """Launch the run for the bound device (``POST /api/runs``).
-
-        The keeper's ``DELETE`` is asynchronous, so a just-killed run can still
-        be tracked for a short window and make ``POST /api/runs`` return
-        ``409 Conflict``. Retry on that transient conflict until ``deadline``.
-        """
-        logger.info(f"{_LOG_TAG} launching run for {self.device_udid}")
-        # The keeper proxies runner traffic to ``device_host``, so it must be
-        # told how to reach the device; supply the device IP at launch.
-        overrides.setdefault("device_host", self.device_ip)
-        while True:
-            try:
-                record = self.keeper.launch(self.device_udid, **overrides)
-                break
-            except KeeperError as exc:
-                if (
-                    exc.status_code == 409
-                    and deadline is not None
-                    and time.monotonic() + interval < deadline
-                ):
-                    logger.debug(
-                        f"{_LOG_TAG} launch conflicted (409); keeper still "
-                        f"releasing previous run for {self.device_udid}, retrying"
-                    )
-                    time.sleep(interval)
-                    continue
-                raise
-        return record
-
-    def _run_state(self) -> str | None:
-        """Return the keeper run ``state`` for this device, or ``None``.
-
-        ``None`` means the keeper tracks no run (``GET`` 404) or the state
-        could not be read.
-        """
-        try:
-            record = self.keeper.status(self.device_udid)
-        except Exception as exc:  # noqa: BLE001 - no run / keeper 404
-            logger.debug(f"{_LOG_TAG} no keeper run for {self.device_udid}: {exc}")
-            return None
-        status = record.get("status") if record else None
-        return status.get("state") if isinstance(status, dict) else None
-
-    def _has_active_run(self) -> bool:
-        """Return ``True`` if the keeper still drives an *active* run.
-
-        Only ``pending``/``building``/``running`` runs make ``POST /api/runs``
-        return ``409`` ("a run is already active"). A finished run record
-        (``exited``/``killed``/``failed``) does not block a relaunch: the
-        keeper overwrites it on the next launch.
-        """
-        return self._run_state() in self._ACTIVE_RUN_STATES
-
-    def _wait_run_inactive(self, *, deadline: float, interval: float) -> None:
-        """Block until the keeper run for this device leaves its active state.
-
-        The keeper's kill (``DELETE``) is asynchronous: it signals
-        ``xcodebuild`` and the run only flips to a terminal state once the
-        process tree tears down. Relaunching while the run is still active
-        makes ``POST /api/runs`` fail with ``409``, so wait for it to finish.
-
-        Raises:
-            HostTimeoutError: If the run is still active when ``deadline``
-                passes.
-        """
-        while time.monotonic() < deadline:
-            if not self._has_active_run():
-                logger.info(f"{_LOG_TAG} previous run finished for {self.device_udid}")
-                return
-            logger.debug(
-                f"{_LOG_TAG} waiting for previous run to finish for {self.device_udid}"
-            )
-            time.sleep(interval)
-        raise HostTimeoutError(
-            f"{_LOG_TAG} previous run did not finish in time for {self.device_udid}"
-        )
-
-    def _ensure_fresh_runner(
-        self,
-        *,
-        deadline: float,
-        interval: float,
-        **launch_overrides,
-    ) -> dict:
-        """Make the keeper drive a freshly-launched run for this device.
-
-        If a previous run is still active it is killed and allowed to reach a
-        terminal state *before* a new run is launched, otherwise the relaunch
-        would attach to a stale runner or be rejected with ``409``. A finished
-        run record needs no teardown: the launch overwrites it.
-
-        Returns:
-            dict: The launched run record from the keeper.
-        """
-        if self._has_active_run():
-            logger.info(
-                f"{_LOG_TAG} active run detected for {self.device_udid}; "
-                f"killing before relaunch"
-            )
-            try:
-                self.kill()
-            except Exception as exc:  # noqa: BLE001 - best-effort teardown
-                logger.debug(f"{_LOG_TAG} kill before relaunch failed: {exc}")
-            self._wait_run_inactive(deadline=deadline, interval=interval)
-        return self._launch_runner(
-            deadline=deadline, interval=interval, **launch_overrides
-        )
-
     def launch_app(
         self,
         *,
         timeout: float = config.DEFAULT_READY_TIMEOUT,
-        interval: float = 2.0,
     ) -> dict:
-        """Launch ``bundle_id`` on the device and make sure it comes up running.
+        """Launch ``bundle_id`` via the keeper's combined launch endpoint.
 
-        Robust against the usual transient states during a run:
-
-        - ensures the keeper is driving a freshly-started runner: a runner
-          left over from a previous run is killed and allowed to fully exit
-          before a new one is launched (otherwise the relaunch could attach
-          to a stale runner);
-        - waits for the on-device runner to be reachable (it may still be
-          spawning right after launch);
-        - terminates (if already running) and relaunches the app via the
-          runner, so a stale/foreground instance is replaced by a fresh one;
-        - retries transient runner failures (server not yet listening,
-          connection resets) until the app launches or ``timeout`` elapses.
+        Delegates the whole flow to ``GET /api/runs/{udid}/launch``: the keeper
+        frees the device by killing any still-active run and waiting for it to
+        finish, launches the xctest run, waits for the on-device runner to come
+        up, then launches the app, returning both the run record and the launch
+        result. The host therefore does not need to kill a leftover run first;
+        the keeper guarantees the device is free before relaunching.
 
         Args:
-            timeout: Overall budget in seconds covering runner restart,
-                readiness, and the launch itself.
-            interval: Delay in seconds between retries / state polls.
+            timeout: Overall budget in seconds covering build, runner startup,
+                and the launch itself; passed to the keeper as ``timeout_secs``.
 
         Returns:
-            dict: The runner's launch result.
+            dict: The keeper's combined result, e.g.
+            ``{"status": "ok", "run": {...}, "launch": {...}}``.
 
         Raises:
             ValueError: If ``bundle_id`` is empty.
-            HostTimeoutError: If the runner does not restart/become ready or
-                the app is not launched within ``timeout``.
+            KeeperError: If the keeper cannot launch the run or the app.
         """
         if not self.bundle_id:
             raise ValueError("bundle_id is required and must be a non-empty string")
 
-        deadline = time.monotonic() + timeout
-        # Make sure the keeper has launched a fresh runner: if one from a
-        # previous run is still alive, kill it and wait for it to exit, then
-        # launch a new one. Only after that does waiting for readiness make sense.
-        self._ensure_fresh_runner(deadline=deadline, interval=interval)
-        self._wait_until_ready(
-            timeout=max(deadline - time.monotonic(), 0.0),
-            interval=interval,
+        result = self.keeper.launch_app(
+            self.device_udid,
+            ip=self.device_ip,
+            bundle_id=self.bundle_id,
+            timeout_secs=int(timeout),
+            # Hold the HTTP request open a bit longer than the keeper's own
+            # budget, since it blocks until the launch finishes.
+            timeout=timeout + config.http_timeout(),
         )
-
-        last_error: Exception | None = None
-        while True:
-            try:
-                result = self.runner().launch_app(self.bundle_id)
-                logger.info(f"{_LOG_TAG} launched {self.bundle_id} on {self.device_ip}")
-                return result
-            except Exception as exc:  # noqa: BLE001 - retry transient runner failures
-                last_error = exc
-                logger.debug(
-                    f"{_LOG_TAG} launch {self.bundle_id} failed, retrying: {exc}"
-                )
-            if time.monotonic() + interval >= deadline:
-                break
-            time.sleep(interval)
-
-        raise HostTimeoutError(
-            f"{_LOG_TAG} app {self.bundle_id} not launched within {timeout}s on "
-            f"{self.device_ip}: {last_error}"
-        )
+        logger.info(f"{_LOG_TAG} launched {self.bundle_id} on {self.device_ip}")
+        return result
 
     def status(self) -> dict:
         """Keeper run status for the bound device."""
@@ -300,31 +155,6 @@ class MacHost(HostBase):
         """Export the run's memgraphs to a presigned URL via the keeper."""
         logger.info(f"{_LOG_TAG} exporting run for {self.device_udid}")
         return self.keeper.export(self.device_udid, presigned_url, content_type)
-
-    def _wait_until_ready(
-        self,
-        *,
-        timeout: float = config.DEFAULT_READY_TIMEOUT,
-        interval: float = 2.0,
-    ) -> None:
-        """Poll the on-device runner until healthy or ``timeout`` elapses.
-
-        Raises:
-            HostTimeoutError: If the runner does not become ready in time.
-        """
-        deadline = time.monotonic() + timeout
-        last_error: Exception | None = None
-        while time.monotonic() < deadline:
-            try:
-                self.runner().health()
-                logger.info(f"{_LOG_TAG} runner ready on {self.device_ip}")
-                return
-            except Exception as exc:  # noqa: BLE001 - retry until the runner is up
-                last_error = exc
-                time.sleep(interval)
-        raise HostTimeoutError(
-            f"{_LOG_TAG} runner not ready within {timeout}s on {self.device_ip}: {last_error}"
-        )
 
     def capture_memgraph(self, timeout: float = 60.0) -> dict:
         """Open a measured window that auto-closes after ``5 seconds``."""

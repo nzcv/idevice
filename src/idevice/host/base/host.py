@@ -114,14 +114,12 @@ class HostBase(ABC):
         self,
         *,
         timeout: float = config.DEFAULT_READY_TIMEOUT,
-        interval: float = 2.0,
     ) -> dict:
         """Launch the bound ``bundle_id`` and make sure it comes up running.
 
         Args:
             timeout: Overall budget in seconds covering runner restart,
                 readiness, and the launch itself.
-            interval: Delay in seconds between retries / state polls.
 
         Returns:
             dict: The runner's launch result.

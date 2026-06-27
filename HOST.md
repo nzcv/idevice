@@ -78,7 +78,7 @@ Build a host from the environment and run the full measurement workflow:
 from idevice.host import Host
 
 host = Host.from_env()  # reads GAUTO_PLATFORM / GAUTO_HOST_* / GAUTO_DEVICE_* / GAUTO_BUNDLE_ID
-host.launch_app()                   # ensure a fresh runner, then launch the app
+host.launch_app()                   # GET /api/runs/{udid}/launch: run + app in one call
 result = host.capture_memgraph(timeout=60)
 host.export(presigned_url)          # POST /api/runs/{udid}/export
 host.kill()                         # DELETE /api/runs/{udid}
@@ -97,7 +97,7 @@ host = Host.create(
     bundle_id="com.rm42.TrashDash",
 )
 
-host.launch_app()                   # POST /api/runs, wait ready, launch app
+host.launch_app()                   # GET /api/runs/{udid}/launch: run + app in one call
 host.capture_memgraph(timeout=60)   # open a measured window and wait for it
 host.export(presigned_url)          # POST /api/runs/{udid}/export
 host.kill()                         # DELETE /api/runs/{udid}

@@ -46,6 +46,7 @@ class Keeper:
         method: str,
         route: str,
         *,
+        params: dict | None = None,
         json_body: dict | None = None,
         timeout: float | None = None,
     ) -> dict | list:
@@ -55,16 +56,19 @@ class Keeper:
             response = requests.request(
                 method,
                 url,
+                params=params,
                 json=json_body,
                 timeout=timeout if timeout is not None else self._timeout,
             )
         except requests.RequestException as exc:
             raise KeeperError(f"{_LOG_TAG} request failed: {method} {url}: {exc}") from exc
         if not response.ok:
+            body = response.text
+            detail = f": {body}" if body else ""
             raise KeeperError(
-                f"{_LOG_TAG} {method} {url} returned {response.status_code}",
+                f"{_LOG_TAG} {method} {url} returned {response.status_code}{detail}",
                 status_code=response.status_code,
-                body=response.text,
+                body=body,
             )
         try:
             return response.json()
@@ -103,6 +107,52 @@ class Keeper:
         payload: dict = {"device_udid": device_udid}
         payload.update({k: v for k, v in overrides.items() if v is not None})
         result = self._request("POST", "/api/runs", json_body=payload)
+        return result if isinstance(result, dict) else {}
+
+    def launch_app(
+        self,
+        device_udid: str,
+        *,
+        ip: str,
+        bundle_id: str,
+        timeout_secs: int | None = None,
+        timeout: float | None = None,
+    ) -> dict:
+        """Launch a run and the app in one call (``GET /api/runs/{udid}/launch``).
+
+        The keeper launches the xctest run, waits for the on-device runner to
+        come up, then launches ``bundle_id`` on the device. This single request
+        blocks until the app is launched or the keeper's deadline elapses.
+
+        Args:
+            device_udid: Target device UDID and run key.
+            ip: Device IP the keeper records as ``device_host`` and proxies the
+                runner through.
+            bundle_id: Bundle id of the app to launch.
+            timeout_secs: Keeper-side budget covering build, runner startup, and
+                launch; ``None`` uses the keeper's default (300s).
+            timeout: Per-request HTTP timeout; must exceed ``timeout_secs`` since
+                the keeper holds the request open until it finishes.
+
+        Returns:
+            dict: The keeper's combined result, e.g.
+            ``{"status": "ok", "run": {...}, "launch": {...}}``.
+        """
+        if not device_udid:
+            raise ValueError("device_udid is required and must be a non-empty string")
+        if not ip:
+            raise ValueError("ip is required and must be a non-empty string")
+        if not bundle_id:
+            raise ValueError("bundle_id is required and must be a non-empty string")
+        params: dict = {"ip": ip, "bundleId": bundle_id}
+        if timeout_secs is not None:
+            params["timeout_secs"] = int(timeout_secs)
+        result = self._request(
+            "GET",
+            f"/api/runs/{device_udid}/launch",
+            params=params,
+            timeout=timeout,
+        )
         return result if isinstance(result, dict) else {}
 
     def status(self, device_udid: str) -> dict:
