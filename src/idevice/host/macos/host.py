@@ -53,6 +53,32 @@ class MacOSHost(HostBase):
         self.keeper = Keeper(self.keeper_ip, self.keeper_port)
         self._runner: Runner | None = None
 
+    @classmethod
+    def from_env(cls) -> MacOSHost:
+        """Build a :class:`MacOSHost` from the ``GAUTO_*`` environment variables.
+
+        Reads ``GAUTO_PLATFORM``, ``GAUTO_HOST_IP``, ``GAUTO_HOST_PORT``,
+        ``GAUTO_HOST_ID``, ``GAUTO_DEVICE_UDID``, ``GAUTO_DEVICE_IP`` and
+        ``GAUTO_BUNDLE_ID``.
+
+        Returns:
+            MacOSHost: A host bound to the keeper/device described by the
+            environment.
+
+        Raises:
+            ValueError: If ``GAUTO_HOST_IP``, ``GAUTO_DEVICE_UDID``,
+                ``GAUTO_DEVICE_IP`` or ``GAUTO_BUNDLE_ID`` is empty.
+        """
+        return cls(
+            platform=config.host_platform(),
+            keeper_ip=config.keeper_ip(),
+            keeper_port=config.keeper_port(),
+            keeper_id=config.keeper_id(),
+            device_udid=config.device_udid(),
+            device_ip=config.device_ip(),
+            bundle_id=config.bundle_id(),
+        )
+
     def runner(self) -> Runner:
         """Return a :class:`Runner` bound to the device's current runner port.
 
