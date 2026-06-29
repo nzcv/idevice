@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from idevice.host import config
 from idevice.host.base.errors import HostNotSupportedError
@@ -92,6 +93,14 @@ class DummyHost(HostBase):
 
     def export(self) -> dict:
         return self._noop("export")
+
+    def screenshot(self, dest_path: Path | str) -> dict:
+        del dest_path
+        return self._noop("screenshot")
+
+    def tap(self, x: float, y: float) -> dict:
+        del x, y
+        return self._noop("tap")
 
     def status(self) -> dict:
         return self._noop("status")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 from idevice.host import config
 from idevice.host.base.runner import Runner
@@ -155,6 +156,51 @@ class HostBase(ABC):
         Returns:
             dict: The export summary, including the uploaded archive's
             ``download_url``.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def screenshot(self, dest_path: Path | str) -> dict:
+        """Capture one screenshot of the device and write it to ``dest_path``.
+
+        Delegates to the on-device runner's ``/api/screenshot`` endpoint via
+        the keeper proxy.
+
+        Args:
+            dest_path: Local path the captured PNG is written to.
+
+        Returns:
+            dict: A result summary including the written screenshot path.
+
+        Raises:
+            HostNotSupportedError: On platforms without an on-device runner.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def tap(self, x: float, y: float) -> dict:
+        """Tap the device screen at the normalized point ``(x, y)``.
+
+        Delegates to the on-device runner's ``/api/tap`` endpoint via the keeper
+        proxy. Coordinates are fractions of the screen (``(0, 0)`` top-left,
+        ``(1, 1)`` bottom-right), so they are independent of the device's pixel
+        resolution and point scale. To tap a feature found in a screenshot,
+        divide its pixel coordinates by the screenshot's width and height.
+
+        The offset is anchored to the foreground app's frame (via the bound
+        ``bundle_id``) so it tracks the current interface orientation; this is
+        what makes taps land correctly for landscape apps.
+
+        Args:
+            x: Horizontal position in ``[0, 1]`` (fraction of screen width).
+            y: Vertical position in ``[0, 1]`` (fraction of screen height).
+
+        Returns:
+            dict: The runner's tap result.
+
+        Raises:
+            HostNotSupportedError: On platforms without an on-device runner.
+            ValueError: If ``x`` or ``y`` is outside ``[0, 1]``.
         """
         raise NotImplementedError
 

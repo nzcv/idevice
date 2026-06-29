@@ -166,6 +166,35 @@ class Runner:
         path.write_bytes(response.content)
         return path
 
+    def tap(self, x: float, y: float, bundle_id: str | None = None) -> dict:
+        """Tap the screen at a normalized point (``/api/tap``).
+
+        Coordinates are fractions of the screen, so they are independent of the
+        device's pixel resolution and point scale: ``(0, 0)`` is the top-left
+        corner and ``(1, 1)`` the bottom-right. To tap a feature located in a
+        screenshot, divide its pixel coordinates by the screenshot's width and
+        height.
+
+        Args:
+            x: Horizontal position in ``[0, 1]`` (fraction of screen width).
+            y: Vertical position in ``[0, 1]`` (fraction of screen height).
+            bundle_id: Foreground app to anchor the offset to. Required to tap
+                correctly in landscape: SpringBoard is portrait-locked, so
+                without it the offset is measured against a portrait frame and
+                lands at the wrong physical point for a landscape app. When set,
+                the runner anchors the offset to that app's frame, which tracks
+                the current interface orientation and matches the screenshot.
+
+        Raises:
+            ValueError: If ``x`` or ``y`` is outside ``[0, 1]``.
+        """
+        if not 0.0 <= x <= 1.0 or not 0.0 <= y <= 1.0:
+            raise ValueError("x and y must be normalized coordinates in [0, 1]")
+        params: dict = {"x": x, "y": y}
+        if bundle_id:
+            params["bundleId"] = bundle_id
+        return self._json(self._get("/api/tap", params=params))
+
     def exit(self) -> dict:
         """Quit the runner (``/api/exit``)."""
         return self._json(self._get("/api/exit"))

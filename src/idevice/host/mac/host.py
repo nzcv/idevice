@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 
 from idevice.host import config
 from idevice.host.base.errors import HostTimeoutError
@@ -141,6 +142,23 @@ class MacHost(HostBase):
         )
         logger.info(f"{_LOG_TAG} launched {self.bundle_id} on {self.device_ip}")
         return result
+
+    def screenshot(self, dest_path: Path | str) -> dict:
+        """Capture one screenshot via the runner and write it to ``dest_path``."""
+        path = self.runner().screenshot(dest_path)
+        logger.info(f"{_LOG_TAG} saved screenshot for {self.device_udid} to {path}")
+        return {"status": "ok", "action": "screenshot", "path": str(path)}
+
+    def tap(self, x: float, y: float) -> dict:
+        """Tap the device screen at the normalized point ``(x, y)`` via the runner.
+
+        The bound ``bundle_id`` is forwarded so the runner anchors the offset to
+        the foreground app's frame, which tracks the current interface
+        orientation (e.g. a landscape game) and matches the screenshot.
+        """
+        ret = self.runner().tap(x, y, bundle_id=self.bundle_id)
+        logger.info(f"{_LOG_TAG} tapped ({x:.4f}, {y:.4f}) on {self.device_udid}")
+        return ret
 
     def status(self) -> dict:
         """Keeper run status for the bound device."""
