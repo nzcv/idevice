@@ -80,6 +80,7 @@ from idevice.host import Host
 host = Host.from_env()  # reads GAUTO_HOST_TYPE / GAUTO_HOST_* / GAUTO_DEVICE_* / GAUTO_BUNDLE_ID
 host.launch_app()                   # GET /api/runs/{udid}/launch: run + app in one call
 result = host.capture_memgraph(timeout=60)
+host.screenshot("screenshot.png")   # GET /api/screenshot -> writes PNG to the given path
 host.export()                       # POST /api/runs/{udid}/export -> {... "download_url": ...}
 host.kill()                         # DELETE /api/runs/{udid}
 ```
@@ -99,6 +100,7 @@ host = Host.create(
 
 host.launch_app()                   # GET /api/runs/{udid}/launch: run + app in one call
 host.capture_memgraph(timeout=60)   # open a measured window and wait for it
+host.screenshot("screenshot.png")   # GET /api/screenshot -> writes PNG to the given path
 host.export()                       # POST /api/runs/{udid}/export -> {... "download_url": ...}
 host.kill()                         # DELETE /api/runs/{udid}
 ```

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "idevice"
-version = "0.7.1"
+version = "0.8.0"
 description = "Cross-platform device automation for end-to-end test workflows"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -42,5 +42,6 @@ select = ["E", "F", "I", "UP"]
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "opencv-python-headless>=4.10",
     "pytest>=8.4.2",
 ]
