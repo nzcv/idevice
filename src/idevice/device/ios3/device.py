@@ -17,6 +17,8 @@ from idevice.device.base.device import DeviceBase
 from idevice.device.base.errors import AppNotInstalledError
 from idevice.device.base.runner import SubprocessRunner
 from idevice.device.cache import InstalledAppCache
+from idevice.device.config import device_id as env_device_id
+from idevice.device.config import device_ip as env_device_ip
 from idevice.device.config import ios3_binary
 
 logger = logging.getLogger('[IOSDevice3]')
@@ -60,6 +62,18 @@ class IOSDevice3(DeviceBase):
                 f"`{self._binary}` CLI not found. Install pymobiledevice3: "
                 "https://github.com/doronz88/pymobiledevice3"
             )
+
+    @classmethod
+    def from_env(cls) -> IOSDevice3:
+        """Build an :class:`IOSDevice3` from the ``GAUTO_*`` environment variables.
+
+        Reads ``GAUTO_DEVICE_UDID`` and ``GAUTO_DEVICE_IP``.
+
+        Returns:
+            IOSDevice3: A device bound to the UDID/IP described by the
+            environment.
+        """
+        return cls(env_device_id(), device_ip=env_device_ip())
 
     def _command(self, *args: str) -> list[str]:
         """Build a pymobiledevice3 command targeting this device's UDID."""
