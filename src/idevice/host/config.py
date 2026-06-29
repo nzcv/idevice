@@ -72,5 +72,5 @@ def ready_timeout() -> float:
     return float(raw) if raw else DEFAULT_READY_TIMEOUT
 
 def bundle_id() -> str:
-    """Return the bundle id (``GAUTO_BUNDLE_ID``)."""
-    return os.environ.get("GAUTO_BUNDLE_ID", "")
+    """Return the bundle id (``GAUTO_PACKAGE_NAME``)."""
+    return os.environ.get("GAUTO_PACKAGE_NAME", "")

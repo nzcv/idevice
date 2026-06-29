@@ -140,7 +140,7 @@ class Host(metaclass=_HostMeta):
 
         Reads ``GAUTO_HOST_TYPE``, ``GAUTO_HOST_IP``, ``GAUTO_HOST_PORT``,
         ``GAUTO_HOST_ID``, ``GAUTO_DEVICE_UDID``, ``GAUTO_DEVICE_IP`` and
-        ``GAUTO_BUNDLE_ID``.
+        ``GAUTO_PACKAGE_NAME``.
 
         Unlike :meth:`create`, this never raises on a missing/blank environment:
         a non-macOS host type, an unsupported host type, or a missing required
@@ -180,7 +180,7 @@ class Host(metaclass=_HostMeta):
                 ("GAUTO_HOST_IP", keeper_ip),
                 ("GAUTO_DEVICE_UDID", device_udid),
                 ("GAUTO_DEVICE_IP", device_ip),
-                ("GAUTO_BUNDLE_ID", bundle_id),
+                ("GAUTO_PACKAGE_NAME", bundle_id),
             )
             if not value
         ]

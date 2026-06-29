@@ -60,7 +60,7 @@ class MacHost(HostBase):
 
         Reads ``GAUTO_HOST_TYPE``, ``GAUTO_HOST_IP``, ``GAUTO_HOST_PORT``,
         ``GAUTO_HOST_ID``, ``GAUTO_DEVICE_UDID``, ``GAUTO_DEVICE_IP`` and
-        ``GAUTO_BUNDLE_ID``.
+        ``GAUTO_PACKAGE_NAME``.
 
         Returns:
             MacHost: A host bound to the keeper/device described by the
@@ -68,7 +68,7 @@ class MacHost(HostBase):
 
         Raises:
             ValueError: If ``GAUTO_HOST_IP``, ``GAUTO_DEVICE_UDID``,
-                ``GAUTO_DEVICE_IP`` or ``GAUTO_BUNDLE_ID`` is empty.
+                ``GAUTO_DEVICE_IP`` or ``GAUTO_PACKAGE_NAME`` is empty.
         """
         return cls(
             host_type=config.host_type(),

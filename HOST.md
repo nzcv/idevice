@@ -77,7 +77,7 @@ Build a host from the environment and run the full measurement workflow:
 ```python
 from idevice.host import Host
 
-host = Host.from_env()  # reads GAUTO_HOST_TYPE / GAUTO_HOST_* / GAUTO_DEVICE_* / GAUTO_BUNDLE_ID
+host = Host.from_env()  # reads GAUTO_HOST_TYPE / GAUTO_HOST_* / GAUTO_DEVICE_* / GAUTO_PACKAGE_NAME
 host.launch_app()                   # GET /api/runs/{udid}/launch: run + app in one call
 result = host.capture_memgraph(timeout=60)
 host.screenshot("screenshot.png")   # GET /api/screenshot -> writes PNG to the given path
