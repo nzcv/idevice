@@ -180,7 +180,7 @@ class MacHost(HostBase):
         ret = self.runner().dt_measuring(5, self.bundle_id)
         # wait state to be "stopped"
         while time.monotonic() < deadline:
-            status = self.runner().measuring_status()
+            status = self.runner().measuring_status(timeout=timeout)
             if status["state"] == "stopped":
                 break
             logger.info(f"{_LOG_TAG} waiting for memgraph to be captured on {self.device_ip}")

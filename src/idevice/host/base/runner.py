@@ -116,13 +116,13 @@ class Runner:
         """Close the measured window (``/api/measuring/stop``)."""
         return self._json(self._get("/api/measuring/stop"))
 
-    def measuring_status(self) -> dict:
+    def measuring_status(self, *, timeout: float | None = None) -> dict:
         """Report the current measuring state (``/api/measuring/status``).
 
         The server's ``state`` walks through ``idle`` (before any measurement),
         ``started`` (while a window is open), and ``stopped`` (after one closes).
         """
-        return self._json(self._get("/api/measuring/status"))
+        return self._json(self._get("/api/measuring/status", timeout=timeout))
 
     def dt_measuring(self, seconds: int, bundle_id: str) -> dict:
         """Open a measured window that auto-closes after ``seconds`` (``/api/measuring/period/{seconds}``)."""
