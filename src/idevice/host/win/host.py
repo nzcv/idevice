@@ -12,11 +12,9 @@ and exists to give Windows controllers a real, non-dummy host.
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 
 from idevice.host import config
-from idevice.host.base.errors import HostTimeoutError
 from idevice.host.base.host import HostBase
 from idevice.host.base.keeper import Keeper
 from idevice.host.base.runner import Runner
