@@ -2,6 +2,11 @@
 
 Cross-platform device automation for end-to-end test workflows: install and manage apps on physical devices, transfer files, and drive UI interactions through a small, platform-agnostic API.
 
+The package ships two complementary APIs:
+
+- **`idevice.device`** — local device automation: talk to a USB/network-attached device through platform CLIs (go-ios, pymobiledevice3, adb) to install apps, transfer files, and drive UI.
+- **`idevice.host`** — keeper-backed remote orchestration: drive a memory-measurement run on a host machine that talks to the EndlessKeeper control server and the on-device RemoteControlTest runner over HTTP.
+
 ## Platform status
 
 | Platform | Backend | App lifecycle | File transfer | Documents sandbox | Swipe | UI automation |
@@ -88,9 +93,12 @@ uv run python examples/ios3_device.py \
   --ipa path/to/app.ipa \
   --app-id com.example.app \
   --sandbox-app-id com.example.app
+
+# Host orchestration: keeper-backed memory-measurement run (see "Host orchestration")
+uv run python examples/host_example.py --from-env --bundle-id com.example.app
 ```
 
-See the module docstrings in each example for prerequisites (Developer Mode, iOS 17+ tunnel, USB debugging, etc.).
+See the module docstrings in each example for prerequisites (Developer Mode, iOS 17+ tunnel, USB debugging, EndlessKeeper reachability, etc.).
 
 ## API overview
 
@@ -127,6 +135,55 @@ Higher-level UI helpers built on top of device tooling. Currently only `AndroidU
 
 Choose `Platform.IOS` or `Platform.IOS3` depending on which CLI you have deployed.
 
+## Host orchestration (`idevice.host`)
+
+The `host` package drives a memory-measurement run from a **host machine** (mac or Windows). The host never dials the device directly: it talks to the EndlessKeeper control server over HTTP, which in turn proxies the on-device RemoteControlTest runner. A host is always bound to a single keeper and a single target device (`device_udid` / `device_ip`) plus the app `bundle_id` under test.
+
+### Host status
+
+| Host type | Implementation | Notes |
+|-----------|----------------|-------|
+| `macos` | `MacHost` | Real keeper-backed host |
+| `windows` | `WindowsHost` | Real keeper-backed host (HTTP-only, mirrors `MacHost`) |
+| anything else (`ios`, `android`, …) | `DummyHost` | No-op host; every operation reports unhealthy and returns an inert default |
+
+### Quick start
+
+Build a host explicitly, or from the controller-injected `GAUTO_*` environment:
+
+```python
+from idevice.host import Host
+
+# Explicit
+host = Host.create(
+    host_type="macos",
+    keeper_ip="192.168.1.7",
+    device_udid="00008120-00123D323",
+    device_ip="192.168.1.5",
+    bundle_id="com.example.app",
+)
+
+# Or from GAUTO_* environment variables (never raises; falls back to DummyHost)
+host = Host.from_env()
+
+host.health()                       # keeper reachable?
+host.launch_app(timeout=300.0)      # start run, wait for runner, launch app
+host.capture_memgraph(timeout=60.0) # open a measured window that auto-closes
+summary = host.export()             # keeper presigns + uploads; returns download_url
+host.screenshot("shot.png")         # capture one screenshot via the runner proxy
+host.tap(0.5, 0.5)                  # tap at normalized screen coordinates
+host.kill()                         # tear down the keeper run
+```
+
+The most recently built host is also reachable anywhere via `Host.Instance`.
+
+`Host.create` / `Host.from_env` return a `HostBase` exposing: `health()`, `runner()`, `launch_app()`, `capture_memgraph()`, `export()`, `screenshot()`, `tap()`, `status()`, `kill()`, and `exit()`. Errors are raised as `HostError` (with `KeeperError`, `RunnerError`, `HostTimeoutError`, and `HostNotSupportedError` subclasses).
+
+### Lower-level clients
+
+- **`Keeper`** — thin HTTP client for the EndlessKeeper control server (`/api/runs` routes): `launch`, `launch_app`, `status`, `list_runs`, `kill`, `export`, `health`.
+- **`Runner`** — thin HTTP client for the on-device runner, reached through the keeper proxy: `launch_app`, `activate`, `terminate`, `start_measuring` / `stop_measuring` / `measuring_status`, `dt_measuring`, `screenshot` (+ periodic), `tap`, `exit`, `health`.
+
 ## Configuration
 
 Environment variables override default binary paths:
@@ -139,6 +196,21 @@ Environment variables override default binary paths:
 | `IDEVICE_POWERSHELL_BINARY` | `powershell` | `WindowsDevice` |
 
 User data (e.g. installed-app cache) is stored under `~/.idevice` by default.
+
+The `idevice.host` orchestrator reads its configuration from the controller-injected environment (used by `Host.from_env`):
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `GAUTO_HOST_TYPE` | — | Host type (`macos` / `windows` run a real host; others → `DummyHost`) |
+| `GAUTO_HOST_IP` | — | EndlessKeeper control-server IP |
+| `GAUTO_HOST_PORT` | `18200` | Keeper control-server port |
+| `GAUTO_HOST_ID` | — | Optional keeper/controller id (informational) |
+| `GAUTO_DEVICE_UDID` | — | Target device UDID |
+| `GAUTO_DEVICE_IP` | — | Target device IP |
+| `GAUTO_DEVICE_SERVER_PORT` | `18100` | On-device runner port |
+| `GAUTO_PACKAGE_NAME` | — | Target app bundle id |
+| `IDEVICE_HOST_TIMEOUT` | `60` | Per-request HTTP timeout (seconds) |
+| `IDEVICE_HOST_READY_TIMEOUT` | `300` | Runner readiness timeout (seconds) |
 
 ## Testing
 
