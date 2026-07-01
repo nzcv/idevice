@@ -1,9 +1,10 @@
 """Public ``Host`` entry point for keeper-backed measurement orchestration.
 
 Use :meth:`Host.create` / :meth:`Host.from_env` to build a host: ``macos``
-yields a real :class:`~idevice.host.mac.host.MacHost`; every other host type
-yields a no-op :class:`~idevice.host.dummy.host.DummyHost` so the controller can
-drive any host type without special-casing it.
+yields a real :class:`~idevice.host.mac.host.MacHost`, ``windows`` yields a real
+:class:`~idevice.host.win.host.WindowsHost`; every other host type yields a no-op
+:class:`~idevice.host.dummy.host.DummyHost` so the controller can drive any host
+type without special-casing it.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from idevice.host import config
 from idevice.host.base.host import HostBase
 from idevice.host.dummy.host import DummyHost
 from idevice.host.mac.host import MacHost
+from idevice.host.win.host import WindowsHost
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +47,10 @@ class _HostMeta(type):
     def Instance(cls) -> HostBase:
         """Return the most recently built host for quick access.
 
-        The instance is a real :class:`~idevice.host.mac.host.MacHost` when
-        one was built, or a no-op :class:`~idevice.host.dummy.host.DummyHost`
-        when :meth:`Host.from_env` could not bind a host.
+        The instance is a real host (:class:`~idevice.host.mac.host.MacHost` or
+        :class:`~idevice.host.win.host.WindowsHost`) when one was built, or a
+        no-op :class:`~idevice.host.dummy.host.DummyHost` when
+        :meth:`Host.from_env` could not bind a host.
 
         Raises:
             RuntimeError: If no host has been built yet (call
@@ -88,11 +91,12 @@ class Host(metaclass=_HostMeta):
         keeper_id: str = "",
         bundle_id: str,
     ) -> HostBase:
-        """Build a host for ``host_type``: ``macos`` -> real host, else dummy.
+        """Build a host for ``host_type``: ``macos``/``windows`` -> real, else dummy.
 
         Args:
-            host_type: Target host type (``macos`` runs the keeper-backed host;
-                every other value resolves to a :class:`DummyHost`).
+            host_type: Target host type (``macos`` and ``windows`` run the
+                keeper-backed host; every other value resolves to a
+                :class:`DummyHost`).
             keeper_ip: EndlessKeeper control-server IP.
             device_udid: Target device UDID.
             device_ip: Target device IP.
@@ -104,13 +108,23 @@ class Host(metaclass=_HostMeta):
             HostBase: The host-type-specific host implementation.
 
         Raises:
-            ValueError: If ``host_type`` is unsupported, or (for ``macos``) a
-                required coordinate is empty.
+            ValueError: If ``host_type`` is unsupported, or (for ``macos`` /
+                ``windows``) a required coordinate is empty.
         """
         h = HostType.from_string(host_type)
         logger.debug(f"{_LOG_TAG} create host_type={h} device_udid={device_udid}")
         if h is HostType.MACOS:
             host: HostBase = MacHost(
+                host_type=host_type,
+                keeper_ip=keeper_ip,
+                keeper_port=keeper_port,
+                keeper_id=keeper_id,
+                device_udid=device_udid,
+                device_ip=device_ip,
+                bundle_id=bundle_id,
+            )
+        elif h is HostType.WINDOWS:
+            host = WindowsHost(
                 host_type=host_type,
                 keeper_ip=keeper_ip,
                 keeper_port=keeper_port,
@@ -143,10 +157,10 @@ class Host(metaclass=_HostMeta):
         ``GAUTO_PACKAGE_NAME``.
 
         Unlike :meth:`create`, this never raises on a missing/blank environment:
-        a non-macOS host type, an unsupported host type, or a missing required
-        coordinate logs the reason and returns a no-op :class:`DummyHost`. The
-        result (real or dummy) is bound as :attr:`Host.Instance`, so callers can
-        always reach it there.
+        an unsupported host type (anything other than ``macos`` / ``windows``)
+        or a missing required coordinate logs the reason and returns a no-op
+        :class:`DummyHost`. The result (real or dummy) is bound as
+        :attr:`Host.Instance`, so callers can always reach it there.
 
         Returns:
             HostBase: The host-type-specific host, or a no-op :class:`DummyHost`
@@ -168,7 +182,7 @@ class Host(metaclass=_HostMeta):
                 host_type, keeper_ip, keeper_port, device_udid, device_ip, bundle_id, keeper_id,
             )
 
-        if h is not HostType.MACOS:
+        if h not in (HostType.MACOS, HostType.WINDOWS):
             return cls._bind_dummy(
                 f"unsupported host type: {host_type}",
                 host_type, keeper_ip, keeper_port, device_udid, device_ip, bundle_id, keeper_id,
