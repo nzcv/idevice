@@ -18,8 +18,8 @@ Examples:
 
     # Build explicitly and drive start -> status -> stop with upload + downscale
     uv run python examples/record_example.py \\
-        --server-ip 192.168.1.7 \\
-        --device-udid 00008120-00123D323 \\
+        --server-ip 127.0.0.1 \\
+        --device-udid 00000000-0000000000000000 \\
         --duration 10 --upload --preset 720p
 
     # Server-side auto-stop after 2h (no local wait), then exit

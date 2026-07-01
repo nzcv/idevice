@@ -47,9 +47,9 @@ The record client reuses the mac-host coordinates injected by the controller
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `GAUTO_HOST_TYPE` | – | Host OS (`macos` \| `ios` \| `android` \| `windows`); non-`macos` yields a `DummyRecord` |
-| `GAUTO_HOST_IP` | – | iRecord server IP (the mac host), e.g. `192.168.1.7` |
+| `GAUTO_HOST_IP` | – | iRecord server IP (the mac host), e.g. `127.0.0.1` |
 | `IRECORD_PORT` | `8080` | iRecord control-server port |
-| `GAUTO_DEVICE_UDID` | – | Target device UDID, e.g. `00008120-00123D323` |
+| `GAUTO_DEVICE_UDID` | – | Target device UDID, e.g. `00000000-0000000000000000` |
 | `IDEVICE_RECORD_TIMEOUT` | `60` | Per-request HTTP timeout (seconds) |
 
 ## Quick start
@@ -72,8 +72,8 @@ from idevice.record import Record
 
 recorder = Record.create(
     record_type="macos",
-    server_ip="192.168.1.7",
-    device_udid="00008120-00123D323",
+    server_ip="127.0.0.1",
+    device_udid="00000000-0000000000000000",
 )
 
 recorder.start(timeout="2h")   # auto-stop after 2h (or pass a number of seconds)

@@ -41,10 +41,10 @@ from pathlib import Path
 from idevice.device import Device, Platform
 
 # iOS via go-ios
-device = Device.create(Platform.IOS, device_id="00008030-001A…", device_ip="")
+device = Device.create(Platform.IOS, device_id="00000000-0000000000000000", device_ip="")
 
 # iOS via pymobiledevice3 (iOS 17+ tunnel support)
-device = Device.create(Platform.IOS3, device_id="00008030-001A…", device_ip="")
+device = Device.create(Platform.IOS3, device_id="00000000-0000000000000000", device_ip="")
 
 # Android via adb
 device = Device.create(Platform.ANDROID, device_id="emulator-5554", device_ip="")
@@ -151,7 +151,7 @@ uv run pytest
 Integration tests under `tests/device/` require a physical iOS device and pymobiledevice3. They are excluded by default; run with:
 
 ```bash
-export IDEVICE_IOS3_UDID="00008030-001A…"
+export IDEVICE_IOS3_UDID="00000000-0000000000000000"
 uv run pytest -m integration tests/device/
 ```
 

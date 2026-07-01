@@ -20,9 +20,9 @@ Examples:
 
     # Build explicitly and drive each step (launch app -> capture -> kill)
     uv run python examples/host_example.py \\
-        --keeper-ip 192.168.1.7 \\
-        --device-udid 00008120-00123D323 \\
-        --device-ip 192.168.1.5 \\
+        --keeper-ip 127.0.0.1 \\
+        --device-udid 00000000-0000000000000000 \\
+        --device-ip 127.0.0.1 \\
         --bundle-id com.rm42.TrashDash --steps
 
     # Capture and export the memgraphs (keeper presigns + uploads)

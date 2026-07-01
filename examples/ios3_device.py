@@ -19,7 +19,7 @@ Examples:
 
     # Explicit UDID and verbose logging
     uv run python examples/ios3_device.py \\
-        --udid 00008101-00161DAE14B8001E -v
+        --udid 00000000-0000000000000000 -v
 """
 
 from __future__ import annotations

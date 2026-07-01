@@ -61,11 +61,11 @@ The controller (`controller/src/worker/engine.rs`) injects these into each subta
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `GAUTO_HOST_TYPE` | – | Host OS (`macos` \| `ios` \| `android` \| `windows`); non-`macos` yields a `DummyHost` |
-| `GAUTO_HOST_IP` | – | Keeper control-server IP, e.g. `192.168.1.7` |
+| `GAUTO_HOST_IP` | – | Keeper control-server IP, e.g. `127.0.0.1` |
 | `GAUTO_HOST_ID` | – | Keeper/controller id, e.g. `14` (informational) |
 | `GAUTO_HOST_PORT` | `18000` | Keeper control-server port |
-| `GAUTO_DEVICE_IP` | – | Target device IP, e.g. `192.168.1.5`; sent to the keeper as `device_host` so it can proxy the runner |
-| `GAUTO_DEVICE_UDID` | – | Target device UDID, e.g. `00008120-00123D323` |
+| `GAUTO_DEVICE_IP` | – | Target device IP, e.g. `127.0.0.1`; sent to the keeper as `device_host` so it can proxy the runner |
+| `GAUTO_DEVICE_UDID` | – | Target device UDID, e.g. `00000000-0000000000000000` |
 | `GAUTO_DEVICE_SERVER_PORT` | `18100` | On-device runner port; owned by the keeper, no longer dialed by the host |
 | `IDEVICE_HOST_TIMEOUT` | `15` | Per-request HTTP timeout (seconds) |
 | `IDEVICE_HOST_READY_TIMEOUT` | `300` | `wait_until_ready` timeout (seconds) |
@@ -92,9 +92,9 @@ from idevice.host import Host
 
 host = Host.create(
     host_type="macos",
-    keeper_ip="192.168.1.7",
-    device_udid="00008120-00123D323",
-    device_ip="192.168.1.5",
+    keeper_ip="127.0.0.1",
+    device_udid="00000000-0000000000000000",
+    device_ip="127.0.0.1",
     bundle_id="com.rm42.TrashDash",
 )
 

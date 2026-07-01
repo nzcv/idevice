@@ -2,7 +2,7 @@
 
 Run (example)::
 
-    export IDEVICE_IOS3_UDID=00008030-001A...
+    export IDEVICE_IOS3_UDID=00000000-0000000000000000
     uv run pytest tests/device/test_ios3_integration.py -m integration -v
 
 Optional install round-trip::
