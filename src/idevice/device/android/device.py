@@ -91,6 +91,12 @@ class AndroidDevice(DeviceBase):
         logger.info(f"[AndroidDevice] Installing package on {self.device_id}: {package_path}")
         if not package_path.exists():
             raise FileNotFoundError(f"Package not found: {package_path}")
+        
+        # Existing package com.hypergryph.beyondtest signatures do not match newer version
+        try:
+            self.uninstall(app_id)
+        except Exception as exc:
+            logger.info(f"Failed to uninstall existing package: {exc}")
 
         try:
             cmd = self._base_command()
