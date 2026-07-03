@@ -24,7 +24,7 @@ class Platform(Enum):
     IOS = "_ios"
     IOS3 = "ios"
     ANDROID = "android"
-    WINDOWS = "windows"
+    WINDOWS = "pc"
 
     @classmethod
     def from_string(cls, platform: str) -> Platform:
