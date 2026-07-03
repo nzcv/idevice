@@ -11,7 +11,7 @@ from idevice.device.base.errors import CommandExecutionError
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_COMMAND_TIMEOUT = 15 * 60  # 15 minutes
+DEFAULT_COMMAND_TIMEOUT = 5 * 60  # 5 minutes
 
 
 @dataclass(frozen=True)
