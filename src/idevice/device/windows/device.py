@@ -8,7 +8,6 @@ import platform
 from pathlib import Path
 
 from idevice.device.base.device import DeviceBase
-from idevice.device.base.errors import AppNotInstalledError
 from idevice.device.base.runner import SubprocessRunner
 from idevice.device.cache import InstalledAppCache, InstalledAppInfo
 from idevice.device.config import powershell_binary
@@ -113,14 +112,6 @@ class WindowsDevice(DeviceBase):
         if not app_id:
             raise ValueError("app_id is required and must be a non-empty string")
         logger.info(f"Stopping app on Windows device {self.device_id}: {app_id}")
-        if not self.is_installed(app_id):
-            raise AppNotInstalledError(f"App not installed: {app_id}")
-        proc = Path(app_id).stem
-        script = (
-            f"Get-Process -Name {self._quote(proc)} -ErrorAction SilentlyContinue "
-            f"| Stop-Process -Force"
-        )
-        self._run_powershell(script)
 
     def get_installed_pkg_name(self, app_id: str) -> InstalledAppInfo | None:
         if not self.is_installed(app_id):

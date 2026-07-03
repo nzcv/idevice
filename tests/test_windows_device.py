@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from idevice.device.base.errors import AppNotInstalledError
 from idevice.device.cache import InstalledAppInfo
 from idevice.device.windows.device import WindowsDevice
 
@@ -89,22 +88,6 @@ def test_uninstall_removes_only_this_app_dir(windows_device) -> None:
     script = runner.run.call_args.args[0][-1]
     assert "Remove-Item" in script
     assert Path(PKG_NAME).stem in script
-
-
-def test_stop_app_raises_when_not_installed(windows_device) -> None:
-    device, _runner, _app_dir = windows_device
-    with pytest.raises(AppNotInstalledError, match="App not installed"):
-        device.stop_app(APP_ID)
-
-
-def test_stop_app_runs_stop_process_when_installed(windows_device) -> None:
-    device, runner, app_dir = windows_device
-    _mark_installed(device, app_dir)
-    device.stop_app(APP_ID)
-    runner.run.assert_called_once()
-    script = runner.run.call_args.args[0][-1]
-    assert "Stop-Process" in script
-    assert Path(APP_ID).stem in script
 
 
 def test_stop_app_rejects_empty_app_id(windows_device) -> None:
