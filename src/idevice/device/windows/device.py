@@ -58,10 +58,10 @@ class WindowsDevice(DeviceBase):
         if package_path.suffix != ".zip":
             raise ValueError("Package must be a zip file")
         # del
-        script = f"Remove-Item -Path D:\\rm42_windows -Recurse -Force"
+        script = "Remove-Item -Path D:\\rm42_windows -Recurse -Force"
         self._run_powershell(script)
 
-        #unzip package_path to D:\\rm42_windows
+        # unzip package_path to D:\\rm42_windows
         script = f"Expand-Archive -Path {self._quote(str(package_path.resolve()))} -DestinationPath D:\\rm42_windows"
         self._run_powershell(script)
         if app_id:            
@@ -75,7 +75,7 @@ class WindowsDevice(DeviceBase):
         if package is None:
             raise AppNotInstalledError(f"App not installed: {app_id}")
         # delete D:\\rm42_windows
-        script = f"Remove-Item -Path D:\\rm42_windows -Recurse -Force"
+        script = "Remove-Item -Path D:\\rm42_windows -Recurse -Force"
         self._run_powershell(script)
         self._app_cache.remove(app_id)
 
