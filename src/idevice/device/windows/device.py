@@ -11,6 +11,7 @@ from pathlib import Path
 from idevice.device.base.device import DeviceBase
 from idevice.device.base.errors import AppNotInstalledError, CommandExecutionError
 from idevice.device.base.runner import SubprocessRunner
+from idevice.device.cache import InstalledAppCache
 from idevice.device.config import powershell_binary
 
 logger = logging.getLogger(__name__)
@@ -19,10 +20,16 @@ logger = logging.getLogger(__name__)
 class WindowsDevice(DeviceBase):
     """``DeviceBase`` implementation for Windows MSIX/AppX packages."""
 
-    def __init__(self, device_id: str, *, device_ip: str = "") -> None:
+    def __init__(
+        self,
+        device_id: str,
+        *,
+        device_ip: str = "",
+        cache_dir: Path | None = None,
+    ) -> None:
         super().__init__(device_id, device_ip, platform="windows")
         self._runner = SubprocessRunner()
-        self._installed_pkg_names: dict[str, str] = {}
+        self._app_cache = InstalledAppCache(device_id, cache_dir=cache_dir)
 
     @classmethod
     def default_udid(cls) -> str:
@@ -35,7 +42,7 @@ class WindowsDevice(DeviceBase):
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            script,
+            f"$ProgressPreference='SilentlyContinue'; {script}",
         ]
         result = self._runner.run(command)
         return result.stdout
@@ -48,10 +55,17 @@ class WindowsDevice(DeviceBase):
         logger.info(f"Installing package on Windows device {self.device_id}: {package_path}")
         if not package_path.exists():
             raise FileNotFoundError(f"Package not found: {package_path}")
-        script = f"Add-AppxPackage -Path {self._quote(str(package_path.resolve()))}"
+        if package_path.suffix != ".zip":
+            raise ValueError("Package must be a zip file")
+        # del
+        script = f"Remove-Item -Path D:\\rm42_windows -Recurse -Force"
         self._run_powershell(script)
-        if app_id:
-            self._installed_pkg_names[app_id] = package_path.name
+
+        #unzip package_path to D:\\rm42_windows
+        script = f"Expand-Archive -Path {self._quote(str(package_path.resolve()))} -DestinationPath D:\\rm42_windows"
+        self._run_powershell(script)
+        if app_id:            
+            self._app_cache.add(app_id, package_path.name)
             logger.debug(f"Cached package name for app_id={app_id}")
         return True
 
@@ -60,9 +74,10 @@ class WindowsDevice(DeviceBase):
         package = self._get_package(app_id)
         if package is None:
             raise AppNotInstalledError(f"App not installed: {app_id}")
-        script = f"Remove-AppxPackage -Package {self._quote(package['PackageFullName'])}"
+        # delete D:\\rm42_windows
+        script = f"Remove-Item -Path D:\\rm42_windows -Recurse -Force"
         self._run_powershell(script)
-        self._installed_pkg_names.pop(app_id, None)
+        self._app_cache.remove(app_id)
 
     def is_installed(self, app_id: str) -> bool:
         installed = self._get_package(app_id) is not None
@@ -72,11 +87,12 @@ class WindowsDevice(DeviceBase):
     def launch_app(self, app_id: str) -> None:
         if not app_id:
             raise ValueError("app_id is required and must be a non-empty string")
-        aumid = self._resolve_aumid(app_id)
-        logger.info(f"Launching app on Windows device {self.device_id}: {app_id} (AUMID={aumid})")
-        apps_folder = f"shell:AppsFolder\\{aumid}"
-        script = f"Start-Process {self._quote(apps_folder)}"
-        self._run_powershell(script)
+        raise NotImplementedError("launch_app is not supported on Windows devices")
+        # aumid = self._resolve_aumid(app_id)
+        # logger.info(f"Launching app on Windows device {self.device_id}: {app_id} (AUMID={aumid})")
+        # apps_folder = f"shell:AppsFolder\\{aumid}"
+        # script = f"Start-Process {self._quote(apps_folder)}"
+        # self._run_powershell(script)
 
     def stop_app(self, app_id: str) -> None:
         if not app_id:
@@ -92,7 +108,8 @@ class WindowsDevice(DeviceBase):
     def get_installed_pkg_name(self, app_id: str) -> str | None:
         if not self.is_installed(app_id):
             return None
-        return self._installed_pkg_names.get(app_id)
+        cached = self._app_cache.get(app_id)
+        return cached.name if cached else None
 
     def host_is_running(self) -> bool:
         return False
