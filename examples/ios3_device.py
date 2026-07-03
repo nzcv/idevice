@@ -245,8 +245,9 @@ def _demo_install_uninstall(
     if not device.is_installed(app_id):
         raise SystemExit(f"{app_id} not reported as installed after install")
 
-    pkg_name = device.get_installed_pkg_name(app_id)
-    logger.info("Installed %s (cached package file: %s)", app_id, pkg_name or ipa_path.name)
+    app_info = device.get_installed_pkg_name(app_id)
+    pkg_file = app_info.path if app_info else ipa_path.name
+    logger.info("Installed %s (cached package file: %s)", app_id, pkg_file)
 
     logger.info("Uninstalling %s", app_id)
     device.uninstall(app_id)

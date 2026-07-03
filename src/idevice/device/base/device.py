@@ -5,6 +5,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+from idevice.device.cache import InstalledAppInfo
+
 
 class DeviceBase(ABC):
     """Install packages and launch apps on a device (adb / ios / hdc, etc.).
@@ -117,18 +119,20 @@ class DeviceBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_installed_pkg_name(self, app_id: str) -> str | None:
-        """Return the installed package file name for an app on the bound device.
+    def get_installed_pkg_name(self, app_id: str) -> InstalledAppInfo | None:
+        """Return the installed app info for an app on the bound device.
 
-        Implementations should return the original package file name
-        (e.g. the ``.ipa`` / ``.apk`` / ``.hap`` filename) recorded at install
-        time, or ``None`` if the app is not installed or no record is found.
+        Implementations should return an :class:`InstalledAppInfo` describing the
+        app (its ``app_id``, package ``version`` and installed ``path``) recorded
+        at install time, or ``None`` if the app is not installed or no record is
+        found.
 
         Args:
             app_id: ID of the app to look up (bundle id / package name).
 
         Returns:
-            str | None: The installed package file name, or ``None`` if not found.
+            InstalledAppInfo | None: The installed app info, or ``None`` if not
+            found.
         """
         raise NotImplementedError
 

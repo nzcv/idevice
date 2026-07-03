@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 from idevice.device.base.device import DeviceBase
+from idevice.device.cache import InstalledAppInfo
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ class DummyDevice(DeviceBase):
         del app_id
         self._noop("stop_app")
 
-    def get_installed_pkg_name(self, app_id: str) -> str | None:
+    def get_installed_pkg_name(self, app_id: str) -> InstalledAppInfo | None:
         del app_id
         self._noop("get_installed_pkg_name")
         return None

@@ -185,7 +185,9 @@ def test_install_uninstall_roundtrip(
         device.install(ios3_test_ipa, app_id=ios3_test_app_id)
         assert device.is_installed(ios3_test_app_id) is True
         pkg_name = device.get_installed_pkg_name(ios3_test_app_id)
-        assert pkg_name == ios3_test_ipa.name
+        assert pkg_name is not None
+        assert pkg_name.version == ios3_test_ipa.stem
+        assert pkg_name.path == ios3_test_ipa.name
     finally:
         if device.is_installed(ios3_test_app_id):
             device.uninstall(ios3_test_app_id)

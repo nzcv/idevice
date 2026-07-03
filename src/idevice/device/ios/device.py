@@ -10,7 +10,7 @@ from pathlib import Path
 from idevice.device.base.device import DeviceBase
 from idevice.device.base.errors import AppNotInstalledError, CommandExecutionError, DeviceNotFoundError
 from idevice.device.base.runner import SubprocessRunner
-from idevice.device.cache import InstalledAppCache
+from idevice.device.cache import InstalledAppCache, InstalledAppInfo
 from idevice.device.config import ios_binary
 
 logger = logging.getLogger(__name__)
@@ -89,7 +89,9 @@ class IOSDevice(DeviceBase):
         ]
         self._runner.run(cmd, timeout=3600)
         if app_id:
-            self._app_cache.add(app_id, package_path.name)
+            self._app_cache.add(
+                app_id, version=package_path.stem, path=None
+            )
             logger.debug(f"{_LOG_TAG} Cached package name for app_id={app_id}")
         return True
 
@@ -141,11 +143,10 @@ class IOSDevice(DeviceBase):
             return False
         return True
 
-    def get_installed_pkg_name(self, app_id: str) -> str | None:
+    def get_installed_pkg_name(self, app_id: str) -> InstalledAppInfo | None:
         if not self.is_installed(app_id):
             return None
-        cached = self._app_cache.get(app_id)
-        return cached.name if cached else None
+        return self._app_cache.get(app_id)
 
     def swipe(
         self,

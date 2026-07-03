@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 from idevice.device.base.device import DeviceBase
 from idevice.device.base.errors import AppNotInstalledError
 from idevice.device.base.runner import SubprocessRunner
-from idevice.device.cache import InstalledAppCache
+from idevice.device.cache import InstalledAppCache, InstalledAppInfo
 from idevice.device.config import device_id as env_device_id
 from idevice.device.config import device_ip as env_device_ip
 from idevice.device.config import ios3_binary
@@ -94,7 +94,9 @@ class IOSDevice3(DeviceBase):
         if result.returncode != 0:
             return False
         if app_id:
-            self._app_cache.add(app_id, package_path.name)
+            self._app_cache.add(
+                app_id, version=package_path.stem, path=None
+            )
             logger.debug(f"{_LOG_TAG} Cached package name for app_id={app_id}")
         return True
 
@@ -150,13 +152,13 @@ class IOSDevice3(DeviceBase):
         except Exception as e:
             logger.error(f"{_LOG_TAG} Failed to stop app {app_id} on {self.device_id}: {e}")
 
-    def get_installed_pkg_name(self, app_id: str) -> str | None:
+    def get_installed_pkg_name(self, app_id: str) -> InstalledAppInfo | None:
         if not self.is_installed(app_id):
             logger.debug(f"{_LOG_TAG} App {app_id} not installed on {self.device_id}")
             return None
         cached = self._app_cache.get(app_id)
-        logger.debug(f"{_LOG_TAG} Cached package name for app_id={app_id}: {cached.name if cached else None}")
-        return cached.name if cached else None
+        logger.debug(f"{_LOG_TAG} Cached app info for app_id={app_id}: {cached}")
+        return cached
 
     def swipe(
         self,
