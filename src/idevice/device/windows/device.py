@@ -86,11 +86,9 @@ class WindowsDevice(DeviceBase):
             self._run_powershell(script)
             self._app_cache.remove(app_id)
 
-    def is_installed(self, app_id: str) -> bool:        
-        if self._app_dir.exists():
-            return True
-        else:
-            return False
+    def is_installed(self, app_id: str) -> bool:
+        cached = self._app_cache.get(app_id)
+        return cached is not None and Path(cached).exists()
 
     def launch_app(self, app_id: str) -> None:
         if not app_id:
