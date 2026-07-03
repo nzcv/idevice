@@ -6,6 +6,7 @@ import json
 import logging
 import platform
 import shlex
+import os
 from pathlib import Path
 
 from idevice.device.base.device import DeviceBase
@@ -30,6 +31,8 @@ class WindowsDevice(DeviceBase):
         super().__init__(device_id, device_ip, platform="windows")
         self._runner = SubprocessRunner()
         self._app_cache = InstalledAppCache(device_id, cache_dir=cache_dir)
+        _app_dir = os.environ.get("IDEVICE_APP_DIR", "D:\\IDeviceExtractedApps")
+        self._app_dir = Path(_app_dir)
 
     @classmethod
     def default_udid(cls) -> str:
@@ -56,33 +59,39 @@ class WindowsDevice(DeviceBase):
         if not package_path.exists():
             raise FileNotFoundError(f"Package not found: {package_path}")
         if package_path.suffix != ".zip":
-            raise ValueError("Package must be a zip file")
+            raise ValueError("Package must be a zip file")        
+        if app_id is None:
+            raise ValueError("app_id is required")
         # del
-        script = "Remove-Item -Path D:\\rm42_windows -Recurse -Force"
+        if self._app_dir.exists():
+            script = f"Remove-Item -Path {self._app_dir} -Recurse -Force"
+            self._run_powershell(script)
+
+        # unzip package_path
+        script = f"Expand-Archive -Path {self._quote(str(package_path.resolve()))} -DestinationPath {self._app_dir}"
         self._run_powershell(script)
 
-        # unzip package_path to D:\\rm42_windows
-        script = f"Expand-Archive -Path {self._quote(str(package_path.resolve()))} -DestinationPath D:\\rm42_windows"
-        self._run_powershell(script)
-        if app_id:            
-            self._app_cache.add(app_id, package_path.name)
-            logger.debug(f"Cached package name for app_id={app_id}")
+        exe = self._app_dir / package_path.with_suffix("").name / app_id
+        if not exe.exists():
+            raise FileNotFoundError(f"Exe not found: {exe}")
+        
+        if app_id:
+            self._app_cache.add(app_id, str(exe.resolve()))
+            logger.debug(f"Cached package name for app_id={app_id}")        
         return True
 
     def uninstall(self, app_id: str) -> None:
         logger.info(f"Uninstalling app on Windows device {self.device_id}: {app_id}")
-        package = self._get_package(app_id)
-        if package is None:
-            raise AppNotInstalledError(f"App not installed: {app_id}")
-        # delete D:\\rm42_windows
-        script = "Remove-Item -Path D:\\rm42_windows -Recurse -Force"
-        self._run_powershell(script)
-        self._app_cache.remove(app_id)
+        if self._app_dir.exists():
+            script = f"Remove-Item -Path {self._app_dir} -Recurse -Force"
+            self._run_powershell(script)
+            self._app_cache.remove(app_id)
 
-    def is_installed(self, app_id: str) -> bool:
-        installed = self._get_package(app_id) is not None
-        logger.debug(f"App {app_id} installed on Windows device {self.device_id}: {installed}")
-        return installed
+    def is_installed(self, app_id: str) -> bool:        
+        if self._app_dir.exists():
+            return True
+        else:
+            return False
 
     def launch_app(self, app_id: str) -> None:
         if not app_id:
@@ -109,7 +118,7 @@ class WindowsDevice(DeviceBase):
         if not self.is_installed(app_id):
             return None
         cached = self._app_cache.get(app_id)
-        return cached.name if cached else None
+        return cached if cached else None
 
     def host_is_running(self) -> bool:
         return False
@@ -185,29 +194,7 @@ class WindowsDevice(DeviceBase):
         raise NotImplementedError("documents_rm is not supported on Windows devices")
 
     def _get_package(self, app_id: str) -> dict[str, str] | None:
-        if "!" in app_id:
-            family_name = app_id.split("!", 1)[0]
-            script = (
-                f"Get-AppxPackage | Where-Object {{ "
-                f"$_.PackageFamilyName -eq {self._quote(family_name)} "
-                f"-or $_.PackageFullName -eq {self._quote(app_id)} "
-                f"}} | Select-Object -First 1 Name, PackageFullName, "
-                f"PackageFamilyName | ConvertTo-Json -Compress"
-            )
-        else:
-            script = (
-                f"$p = Get-AppxPackage -Name {self._quote(app_id)} | "
-                f"Select-Object -First 1 Name, PackageFullName, "
-                f"PackageFamilyName; if ($null -eq $p) {{ exit 0 }}; "
-                f"$p | ConvertTo-Json -Compress"
-            )
-        output = self._run_powershell(script).strip()
-        if not output:
-            return None
-        data = json.loads(output)
-        if isinstance(data, list):
-            return data[0] if data else None
-        return data
+        return None
 
     def _resolve_aumid(self, app_id: str) -> str:
         if "!" in app_id:

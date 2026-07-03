@@ -33,11 +33,11 @@ class InstalledAppCache:
         with open(self._cache_file, "w", encoding="utf-8") as f:
             json.dump(data, f)
 
-    def add(self, app_id: str, package_path: Path) -> None:
+    def add(self, app_id: str, package_path: str) -> None:
         """Record ``app_id`` mapped to ``package_path`` for this device."""
         logger.debug(f"Caching app_id={app_id} -> {package_path} for device {self._device_id}")
         data = self._load()
-        data[app_id] = str(package_path.resolve())
+        data[app_id] = package_path
         self._save(data)
 
     def remove(self, app_id: str) -> None:

@@ -89,7 +89,7 @@ class IOSDevice(DeviceBase):
         ]
         self._runner.run(cmd, timeout=3600)
         if app_id:
-            self._app_cache.add(app_id, package_path)
+            self._app_cache.add(app_id, package_path.name)
             logger.debug(f"{_LOG_TAG} Cached package name for app_id={app_id}")
         return True
 

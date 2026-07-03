@@ -108,7 +108,7 @@ class AndroidDevice(DeviceBase):
             raise AndroidDeviceError(f"Package install failed on {self.device_id}: {exc}") from exc
 
         if app_id:
-            self._app_cache.add(app_id, package_path)
+            self._app_cache.add(app_id, package_path.name)
             logger.debug(f"[AndroidDevice] Cached package name for app_id={app_id}")
         return True
 
