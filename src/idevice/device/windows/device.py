@@ -36,7 +36,7 @@ class WindowsDevice(DeviceBase):
         """Return the local host name as the default Windows device id."""
         return platform.node()
 
-    def _run_powershell(self, script: str, timeout: int = 15 * 60) -> str:
+    def _run_powershell(self, script: str, timeout: int = 20 * 60) -> str:
         command = [
             powershell_binary(),
             "-NoProfile",
@@ -44,7 +44,7 @@ class WindowsDevice(DeviceBase):
             "-Command",
             f"$ProgressPreference='SilentlyContinue'; {script}",
         ]
-        result = self._runner.run(command)
+        result = self._runner.run(command, timeout=timeout)
         return result.stdout
 
     @staticmethod
