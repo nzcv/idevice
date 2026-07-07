@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 from idevice.record import config
-from pathlib import Path
+
 
 class RecordBase(ABC):
     """Drive screen recording of one device via the iRecord control server.
