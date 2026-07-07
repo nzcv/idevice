@@ -435,3 +435,8 @@ class WindowsRecord(RecordBase):
             "size_bytes": size_bytes,
             "elapsed_seconds": elapsed_seconds,
         }
+
+    @property
+    def out_path(self) -> Path | None:
+        """Return the output path for the recording."""
+        return Path(self._output_path) if self._output_path and Path(self._output_path).exists() else None

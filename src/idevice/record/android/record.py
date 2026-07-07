@@ -186,7 +186,6 @@ class AndroidRecord(RecordBase):
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_udid = re.sub(r"[^A-Za-z0-9._-]", "_", self._device_udid)
         output_path = self._output_dir / f"{safe_udid}_{stamp}.mp4"
-        self._output_path = output_path
         
         is_windows = sys.platform == "win32"
         seconds = _parse_timeout_seconds(timeout)
@@ -215,8 +214,8 @@ class AndroidRecord(RecordBase):
                 stderr=subprocess.PIPE,
                 creationflags=creationflags,
             )
-        except OSError as exc:
-            raise RecordServerError(f"{_LOG_TAG} failed to launch scrcpy: {exc}") from exc
+        except Exception as exc:
+            raise RuntimeError(f"{_LOG_TAG} failed to launch scrcpy: {exc}") from exc
 
         self._output_path = output_path
         self._started_at = time.time()
@@ -356,3 +355,8 @@ class AndroidRecord(RecordBase):
             "size_bytes": size_bytes,
             "elapsed_seconds": elapsed_seconds,
         }
+
+    @property
+    def out_path(self) -> Path | None:
+        """Return the output path for the recording."""
+        return Path(self._output_path) if self._output_path and Path(self._output_path).exists() else None
