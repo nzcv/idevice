@@ -17,6 +17,8 @@ DEFAULT_RECORD_PORT = 18300
 DEFAULT_HTTP_TIMEOUT = 60.0
 DEFAULT_SCRCPY_BINARY = "scrcpy.exe"
 DEFAULT_STOP_TIMEOUT = 15.0
+DEFAULT_FFMPEG_BINARY = "ffmpeg.exe"
+DEFAULT_FFMPEG_FRAMERATE = 30
 
 
 def record_type() -> str:
@@ -89,3 +91,44 @@ def stop_timeout() -> float:
     """Return seconds to wait for scrcpy to finalize on stop (``IDEVICE_RECORD_STOP_TIMEOUT``)."""
     raw = os.environ.get("IDEVICE_RECORD_STOP_TIMEOUT")
     return float(raw) if raw else DEFAULT_STOP_TIMEOUT
+
+
+def ffmpeg_binary() -> str:
+    """Return the ffmpeg CLI binary path (``IDEVICE_FFMPEG_BINARY``).
+
+    The Windows recorder shells out to ``ffmpeg`` on the local host to capture the
+    desktop via the ``gdigrab`` input device; override this when ffmpeg is not on
+    ``PATH``.
+    """
+    return os.environ.get("IDEVICE_FFMPEG_BINARY", DEFAULT_FFMPEG_BINARY)
+
+
+def ffmpeg_framerate() -> int:
+    """Return the desktop capture frame rate (``IDEVICE_FFMPEG_FRAMERATE``)."""
+    raw = os.environ.get("IDEVICE_FFMPEG_FRAMERATE")
+    return int(raw) if raw else DEFAULT_FFMPEG_FRAMERATE
+
+
+def ffmpeg_extra_args() -> list[str]:
+    """Return extra ffmpeg CLI args (``IDEVICE_FFMPEG_EXTRA_ARGS``).
+
+    Parsed with :func:`shlex.split` so quoting works cross-platform (e.g.
+    ``-vf scale=1280:-1 -b:v 8M``). Returns an empty list when unset. These are
+    inserted before the output file, so they can override the default encoder
+    options.
+    """
+    raw = os.environ.get("IDEVICE_FFMPEG_EXTRA_ARGS", "")
+    return shlex.split(raw) if raw.strip() else []
+
+
+def ffmpeg_input() -> str:
+    """Return the ``gdigrab`` capture target (``GAUTO_PACKAGE_NAME``).
+
+    Defaults to ``desktop`` (whole-screen capture). ``gdigrab`` itself only
+    accepts ``desktop`` | ``title=<window title>`` | ``hwnd=<hwnd>``; the Windows
+    recorder additionally treats a bare app/exe name (the controller injects the
+    app under test as ``GAUTO_PACKAGE_NAME``, e.g. ``Endfield.exe``) by resolving
+    it to that app's window title, and falls back to ``desktop`` when no window
+    is found.
+    """
+    return os.environ.get("GAUTO_PACKAGE_NAME", "desktop")

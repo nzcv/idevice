@@ -1,8 +1,10 @@
 # record
 
-The `record` module is the Python client side of the iRecord screen-recording
-workflow. It runs **only on the mac host**; a test script uses it to start/stop a
-video-only H.264 recording of a USB-connected iOS device. On every other platform
+The `record` module is the Python side of the screen-recording workflow. On the
+**mac host** it is the iRecord client: a test script uses it to start/stop a
+video-only H.264 recording of a USB-connected iOS device. On an **Android host**
+it shells out to the local `scrcpy` CLI, and on a **Windows host** it shells out
+to the local `ffmpeg` CLI (`gdigrab` desktop capture). On every other platform
 the factory returns a no-op `DummyRecord` (health is always `False`, all
 operations are inert placeholders) so the controller can drive any platform
 without special-casing.
@@ -31,13 +33,36 @@ shared infrastructure, and one subpackage per host-type implementation.
 
 - `record/record.py` — `Record` factory + `RecordType` enum + `_RecordMeta`
   singleton accessor. `Record.create(...)` / `Record.from_env()` return a
-  `RecordBase` (`macos` → `MacRecord`, every other host type → `DummyRecord`).
+  `RecordBase` (`macos` → `MacRecord`, `android` → `AndroidRecord`, `windows` →
+  `WindowsRecord`, every other host type → `DummyRecord`).
 - `record/config.py` — env-based config accessors.
 - `record/base/record.py` — `RecordBase` abstract base class (the record API).
 - `record/base/client.py` — `IRecordClient` control-server HTTP client.
 - `record/base/errors.py` — `RecordError` hierarchy.
 - `record/mac/record.py` — `MacRecord(RecordBase)`, the real iRecord-backed recorder.
+- `record/android/record.py` — `AndroidRecord(RecordBase)`, the local scrcpy recorder.
+- `record/windows/record.py` — `WindowsRecord(RecordBase)`, the local ffmpeg
+  desktop recorder.
 - `record/dummy/record.py` — `DummyRecord(RecordBase)`, the no-op fallback.
+
+## Local recorders (Android & Windows)
+
+Unlike the iRecord-backed macOS recorder, the `android` and `windows` recorders
+run **on the host itself** and have no control server — they supervise a local
+CLI subprocess and write an MP4 to a local directory
+(`IDEVICE_RECORD_OUTPUT_DIR`, defaults to `~/.idevice/records`):
+
+- **Android** shells out to `scrcpy` to record a USB/TCP-connected Android
+  device (`GAUTO_DEVICE_UDID` is the adb serial). Configure via
+  `IDEVICE_SCRCPY_BINARY` / `IDEVICE_SCRCPY_EXTRA_ARGS`.
+- **Windows** shells out to `ffmpeg` with the `gdigrab` input to record the
+  local desktop (`GAUTO_DEVICE_UDID` labels the output file — typically the host
+  name). Configure via `IDEVICE_FFMPEG_BINARY` / `IDEVICE_FFMPEG_FRAMERATE` /
+  `IDEVICE_FFMPEG_EXTRA_ARGS`. Requires `ffmpeg` on `PATH`
+  (https://ffmpeg.org/download.html).
+
+Both stop the recording cleanly so the MP4 footer (`moov` atom) is written, and
+support an in-process auto-stop `timeout` on `start(...)`.
 
 ## Environment variables
 
@@ -46,11 +71,15 @@ The record client reuses the mac-host coordinates injected by the controller
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `GAUTO_HOST_TYPE` | – | Host OS (`macos` \| `ios` \| `android` \| `windows`); non-`macos` yields a `DummyRecord` |
-| `GAUTO_HOST_IP` | – | iRecord server IP (the mac host), e.g. `127.0.0.1` |
-| `IRECORD_PORT` | `8080` | iRecord control-server port |
-| `GAUTO_DEVICE_UDID` | – | Target device UDID, e.g. `00000000-0000000000000000` |
-| `IDEVICE_RECORD_TIMEOUT` | `60` | Per-request HTTP timeout (seconds) |
+| `GAUTO_HOST_TYPE` | – | Host OS (`macos` \| `ios` \| `android` \| `windows`); `macos`/`android`/`windows` bind a real recorder, others yield a `DummyRecord` |
+| `GAUTO_HOST_IP` | – | iRecord server IP (the mac host), e.g. `127.0.0.1`; unused for `android`/`windows` |
+| `IRECORD_PORT` | `8080` | iRecord control-server port; unused for `android`/`windows` |
+| `GAUTO_DEVICE_UDID` | – | Target device UDID (adb serial for `android`, host name for `windows`) |
+| `IDEVICE_RECORD_TIMEOUT` | `60` | Per-request HTTP timeout (seconds, macOS only) |
+| `IDEVICE_RECORD_OUTPUT_DIR` | `~/.idevice/records` | Local output dir for `android`/`windows` recordings |
+| `IDEVICE_FFMPEG_BINARY` | `ffmpeg.exe` | ffmpeg CLI path (`windows`) |
+| `IDEVICE_FFMPEG_FRAMERATE` | `30` | Desktop capture frame rate (`windows`) |
+| `IDEVICE_FFMPEG_EXTRA_ARGS` | – | Extra ffmpeg args, e.g. `-vf scale=1280:-1` (`windows`) |
 
 ## Quick start
 

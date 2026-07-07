@@ -3,9 +3,12 @@
 Use :meth:`Record.create` / :meth:`Record.from_env` to build a recorder:
 ``macos`` yields a real :class:`~idevice.record.mac.record.MacRecord` (iRecord
 control server), ``android`` yields a real
-:class:`~idevice.record.android.record.AndroidRecord` (local scrcpy); every
-other host type yields a no-op :class:`~idevice.record.dummy.record.DummyRecord`
-so the controller can drive any host type without special-casing it.
+:class:`~idevice.record.android.record.AndroidRecord` (local scrcpy),
+``windows`` yields a real
+:class:`~idevice.record.windows.record.WindowsRecord` (local ffmpeg desktop
+capture); every other host type yields a no-op
+:class:`~idevice.record.dummy.record.DummyRecord` so the controller can drive
+any host type without special-casing it.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from idevice.record.base.errors import RecordError
 from idevice.record.base.record import RecordBase
 from idevice.record.dummy.record import DummyRecord
 from idevice.record.mac.record import MacRecord
+from idevice.record.windows.record import WindowsRecord
 
 logger = logging.getLogger(__name__)
 
@@ -93,23 +97,27 @@ class Record(metaclass=_RecordMeta):
 
         Args:
             record_type: Target host type (``macos`` runs the iRecord-backed
-                recorder, ``android`` runs the local scrcpy recorder; every other
-                value resolves to a :class:`DummyRecord`).
+                recorder, ``android`` runs the local scrcpy recorder, ``windows``
+                runs the local ffmpeg desktop recorder; every other value
+                resolves to a :class:`DummyRecord`).
             server_ip: iRecord control-server IP (the mac host); unused for
-                ``android``.
-            device_udid: Target device UDID (adb serial for ``android``).
-            server_port: iRecord control-server port; unused for ``android``.
+                ``android`` and ``windows``.
+            device_udid: Target device UDID (adb serial for ``android``, host name
+                for ``windows``).
+            server_port: iRecord control-server port; unused for ``android`` and
+                ``windows``.
 
         Returns:
             RecordBase: The host-type-specific recorder implementation
             (``macos`` -> :class:`MacRecord`, ``android`` -> :class:`AndroidRecord`,
-            else :class:`DummyRecord`).
+            ``windows`` -> :class:`WindowsRecord`, else :class:`DummyRecord`).
 
         Raises:
             ValueError: If ``record_type`` is unsupported, or a required
-                coordinate is empty (``macos`` needs ``server_ip``; both need
+                coordinate is empty (``macos`` needs ``server_ip``; all need
                 ``device_udid``).
-            RecordError: If ``android`` is requested but the scrcpy CLI is missing.
+            RecordError: If ``android`` is requested but the scrcpy CLI is missing,
+                or ``windows`` is requested but the ffmpeg CLI is missing.
         """
         r = RecordType.from_string(record_type)
         logger.debug(f"{_LOG_TAG} create record_type={r} device_udid={device_udid}")
@@ -122,6 +130,13 @@ class Record(metaclass=_RecordMeta):
             )
         elif r is RecordType.ANDROID:
             recorder = AndroidRecord(
+                record_type=record_type,
+                server_ip=server_ip,
+                server_port=server_port,
+                device_udid=device_udid,
+            )
+        elif r is RecordType.WINDOWS:
+            recorder = WindowsRecord(
                 record_type=record_type,
                 server_ip=server_ip,
                 server_port=server_port,
@@ -147,19 +162,20 @@ class Record(metaclass=_RecordMeta):
 
         Reads ``GAUTO_HOST_TYPE``, ``GAUTO_HOST_IP``, ``IRECORD_PORT`` and
         ``GAUTO_DEVICE_UDID`` (plus the optional ``IDEVICE_SCRCPY_*`` overrides
-        for Android).
+        for Android and ``IDEVICE_FFMPEG_*`` overrides for Windows).
 
         Unlike :meth:`create`, this never raises on a missing/blank environment:
         an unsupported host type, a missing required coordinate, or a missing
-        scrcpy CLI (Android) logs the reason and returns a no-op
-        :class:`DummyRecord`. The result (real or dummy) is bound as
+        CLI (scrcpy for Android, ffmpeg for Windows) logs the reason and returns
+        a no-op :class:`DummyRecord`. The result (real or dummy) is bound as
         :attr:`Record.Instance`, so callers can always reach it there.
 
         Returns:
             RecordBase: The host-type-specific recorder (``macos`` ->
-            :class:`MacRecord`, ``android`` -> :class:`AndroidRecord`), or a
-            no-op :class:`DummyRecord` whose every operation reports unhealthy
-            and returns an inert default.
+            :class:`MacRecord`, ``android`` -> :class:`AndroidRecord`,
+            ``windows`` -> :class:`WindowsRecord`), or a no-op
+            :class:`DummyRecord` whose every operation reports unhealthy and
+            returns an inert default.
         """
         record_type = config.record_type()
         server_ip = config.server_ip()
@@ -177,6 +193,8 @@ class Record(metaclass=_RecordMeta):
         if r is RecordType.MACOS:
             required = (("GAUTO_HOST_IP", server_ip), ("GAUTO_DEVICE_UDID", device_udid))
         elif r is RecordType.ANDROID:
+            required = (("GAUTO_DEVICE_UDID", device_udid),)
+        elif r is RecordType.WINDOWS:
             required = (("GAUTO_DEVICE_UDID", device_udid),)
         else:
             return cls._bind_dummy(
