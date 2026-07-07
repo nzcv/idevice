@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from idevice.record import config
-from idevice.record.base.errors import RecordError, RecordServerError
+from idevice.record.base.errors import RecordError
 from idevice.record.base.record import RecordBase
 
 logger = logging.getLogger(__name__)
