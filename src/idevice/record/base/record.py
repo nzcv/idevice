@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from idevice.record import config
-
+from pathlib import Path
 
 class RecordBase(ABC):
     """Drive screen recording of one device via the iRecord control server.
@@ -23,6 +23,7 @@ class RecordBase(ABC):
         server_ip: str,
         server_port: int = config.DEFAULT_RECORD_PORT,
         device_udid: str,
+        out_path: str | None = None,
     ) -> None:
         """Bind the recorder to an iRecord control server and a target device.
 
@@ -43,6 +44,7 @@ class RecordBase(ABC):
         self._server_ip = server_ip
         self._server_port = int(server_port)
         self._device_udid = device_udid
+        self.out_path = out_path
 
     @property
     def record_type(self) -> str:
@@ -101,3 +103,8 @@ class RecordBase(ABC):
     def status(self) -> dict:
         """Return the iRecord recording status for the bound device."""
         raise NotImplementedError
+
+    @property
+    def out_path(self) -> Path | None:
+        """Return the output path for the recording."""
+        return Path(self._out_path) if self._out_path and Path(self._out_path).exists() else None
