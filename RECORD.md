@@ -53,8 +53,10 @@ CLI subprocess and write an MP4 to a local directory
 (`IDEVICE_RECORD_OUTPUT_DIR`, defaults to `~/.idevice/records`):
 
 - **Android** shells out to `scrcpy` to record a USB/TCP-connected Android
-  device (`GAUTO_DEVICE_UDID` is the adb serial). Configure via
-  `IDEVICE_SCRCPY_BINARY` / `IDEVICE_SCRCPY_EXTRA_ARGS`.
+  device (`GAUTO_DEVICE_UDID` is the adb serial). Records at **720p** by default
+  (`--max-size 1280`) with a **4M** bit rate (`--video-bit-rate 4M`; scrcpy's own
+  default is 8M). Configure via `IDEVICE_SCRCPY_BINARY` / `IDEVICE_SCRCPY_MAX_SIZE`
+  / `IDEVICE_SCRCPY_VIDEO_BIT_RATE` / `IDEVICE_SCRCPY_EXTRA_ARGS`.
 - **Windows** shells out to `ffmpeg` with the `gdigrab` input to record the
   local desktop (`GAUTO_DEVICE_UDID` labels the output file — typically the host
   name). Configure via `IDEVICE_FFMPEG_BINARY` / `IDEVICE_FFMPEG_FRAMERATE` /
@@ -77,6 +79,10 @@ The record client reuses the mac-host coordinates injected by the controller
 | `GAUTO_DEVICE_UDID` | – | Target device UDID (adb serial for `android`, host name for `windows`) |
 | `IDEVICE_RECORD_TIMEOUT` | `60` | Per-request HTTP timeout (seconds, macOS only) |
 | `IDEVICE_RECORD_OUTPUT_DIR` | `~/.idevice/records` | Local output dir for `android`/`windows` recordings |
+| `IDEVICE_SCRCPY_BINARY` | `scrcpy.exe` | scrcpy CLI path (`android`) |
+| `IDEVICE_SCRCPY_MAX_SIZE` | `1280` | scrcpy `--max-size` cap; defaults to 720p (`android`). Set `0` for native resolution |
+| `IDEVICE_SCRCPY_VIDEO_BIT_RATE` | `4M` | scrcpy `--video-bit-rate` (`android`). Set `0`/empty to use scrcpy's default (8M) |
+| `IDEVICE_SCRCPY_EXTRA_ARGS` | – | Extra scrcpy args, e.g. `--video-bit-rate 8M` (`android`) |
 | `IDEVICE_FFMPEG_BINARY` | `ffmpeg.exe` | ffmpeg CLI path (`windows`) |
 | `IDEVICE_FFMPEG_FRAMERATE` | `30` | Desktop capture frame rate (`windows`) |
 | `IDEVICE_FFMPEG_EXTRA_ARGS` | – | Extra ffmpeg args, e.g. `-vf scale=1280:-1` (`windows`) |

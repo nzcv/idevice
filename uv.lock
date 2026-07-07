@@ -907,7 +907,7 @@ wheels = [
 
 [[package]]
 name = "idevice"
-version = "0.12.0"
+version = "0.12.2"
 source = { editable = "." }
 dependencies = [
     { name = "pymobiledevice3" },

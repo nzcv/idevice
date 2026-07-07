@@ -16,6 +16,8 @@ from pathlib import Path
 DEFAULT_RECORD_PORT = 18300
 DEFAULT_HTTP_TIMEOUT = 60.0
 DEFAULT_SCRCPY_BINARY = "scrcpy.exe"
+DEFAULT_SCRCPY_MAX_SIZE = 1280
+DEFAULT_SCRCPY_VIDEO_BIT_RATE = "4M"
 DEFAULT_STOP_TIMEOUT = 15.0
 DEFAULT_FFMPEG_BINARY = "ffmpeg.exe"
 DEFAULT_FFMPEG_FRAMERATE = 30
@@ -85,6 +87,46 @@ def scrcpy_extra_args() -> list[str]:
     """
     raw = os.environ.get("IDEVICE_SCRCPY_EXTRA_ARGS", "")
     return shlex.split(raw) if raw.strip() else []
+
+
+def scrcpy_max_size() -> int | None:
+    """Return the scrcpy ``--max-size`` cap (``IDEVICE_SCRCPY_MAX_SIZE``).
+
+    Caps the longest video dimension so the Android recorder defaults to 720p
+    (``1280``, i.e. 720x1280 portrait / 1280x720 landscape). Set the env var to
+    ``0`` (or empty) to disable the cap and record at the device's native
+    resolution.
+
+    Returns:
+        The max-size in pixels, or ``None`` when disabled.
+    """
+    raw = os.environ.get("IDEVICE_SCRCPY_MAX_SIZE")
+    if raw is None:
+        return DEFAULT_SCRCPY_MAX_SIZE
+    raw = raw.strip()
+    if not raw:
+        return None
+    value = int(raw)
+    return value if value > 0 else None
+
+
+def scrcpy_video_bit_rate() -> str | None:
+    """Return the scrcpy ``--video-bit-rate`` (``IDEVICE_SCRCPY_VIDEO_BIT_RATE``).
+
+    Sets the encoding bit rate so the Android recorder defaults to ``4M`` (scrcpy's
+    own default is ``8M``), trading some quality for smaller files. Set the env var
+    to ``0`` (or empty) to drop the flag and use scrcpy's default bit rate.
+
+    Returns:
+        The bit rate string (e.g. ``"4M"``), or ``None`` when disabled.
+    """
+    raw = os.environ.get("IDEVICE_SCRCPY_VIDEO_BIT_RATE")
+    if raw is None:
+        return DEFAULT_SCRCPY_VIDEO_BIT_RATE
+    raw = raw.strip()
+    if not raw or raw == "0":
+        return None
+    return raw
 
 
 def stop_timeout() -> float:

@@ -73,6 +73,8 @@ class AndroidRecord(RecordBase):
         server_port: int = config.DEFAULT_RECORD_PORT,
         output_dir: Path | None = None,
         scrcpy_binary: str | None = None,
+        max_size: int | None = None,
+        video_bit_rate: str | None = None,
         extra_args: list[str] | None = None,
     ) -> None:
         """Bind the recorder to an Android device and locate the scrcpy CLI.
@@ -86,6 +88,12 @@ class AndroidRecord(RecordBase):
                 :func:`idevice.record.config.record_output_dir`.
             scrcpy_binary: scrcpy CLI path; defaults to
                 :func:`idevice.record.config.scrcpy_binary`.
+            max_size: scrcpy ``--max-size`` cap (longest video dimension);
+                defaults to :func:`idevice.record.config.scrcpy_max_size`
+                (720p). Pass ``0``/``None`` (via env) to record native resolution.
+            video_bit_rate: scrcpy ``--video-bit-rate``; defaults to
+                :func:`idevice.record.config.scrcpy_video_bit_rate` (``4M``).
+                Pass ``0``/``None`` (via env) to use scrcpy's default bit rate.
             extra_args: Extra scrcpy CLI args appended to every recording;
                 defaults to :func:`idevice.record.config.scrcpy_extra_args`.
 
@@ -103,6 +111,12 @@ class AndroidRecord(RecordBase):
         self._device_udid = device_udid
         self._output_dir = Path(output_dir) if output_dir else config.record_output_dir()
         self._scrcpy_binary = scrcpy_binary or config.scrcpy_binary()
+        resolved_max_size = max_size if max_size is not None else config.scrcpy_max_size()
+        self._max_size = resolved_max_size if resolved_max_size and resolved_max_size > 0 else None
+        resolved_bit_rate = (
+            video_bit_rate if video_bit_rate is not None else config.scrcpy_video_bit_rate()
+        )
+        self._video_bit_rate = resolved_bit_rate or None
         self._extra_args = list(extra_args) if extra_args is not None else config.scrcpy_extra_args()
 
         resolved = shutil.which(self._scrcpy_binary)
@@ -201,6 +215,14 @@ class AndroidRecord(RecordBase):
         else:
             command.append("--no-playback")
         command += ["--record", str(output_path)]
+        # Default to 720p (--max-size 1280). Placed before extra_args so an
+        # explicit --max-size there still wins (scrcpy uses the last value).
+        if self._max_size:
+            command += ["--max-size", str(self._max_size)]
+        # Default to a 4M bit rate (scrcpy's own default is 8M) for smaller files.
+        # Placed before extra_args so an explicit --video-bit-rate there wins.
+        if self._video_bit_rate:
+            command += ["--video-bit-rate", str(self._video_bit_rate)]
         command.extend(self._extra_args)
 
         logger.info(f"{_LOG_TAG} starting recording: {' '.join(command)}")
