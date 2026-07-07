@@ -29,45 +29,6 @@ logger = logging.getLogger(__name__)
 
 _LOG_TAG = "[AndroidRecord]"
 
-_WM_CLOSE = 0x0010
-
-
-def _close_process_windows(pid: int) -> int:
-    """Post ``WM_CLOSE`` to every top-level window owned by ``pid`` (Windows only).
-
-    scrcpy can only finalize an MP4 recording (write the trailing ``moov`` atom)
-    when it runs its normal shutdown path. On Windows a headless scrcpy stopped by
-    a console control event (``CTRL_C``/``CTRL_BREAK``) is killed before the muxer
-    writes that footer, leaving an unplayable, zero-duration file. Closing its
-    window with ``WM_CLOSE`` instead triggers the clean shutdown, so this locates
-    the recorder's windows and asks them to close.
-
-    Args:
-        pid: The scrcpy process id whose windows should be closed.
-
-    Returns:
-        The number of windows that were sent ``WM_CLOSE``.
-    """
-    import ctypes
-    from ctypes import wintypes
-
-    user32 = ctypes.windll.user32  # type: ignore[attr-defined]
-    hwnds: list[int] = []
-
-    @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
-    def _collect(hwnd, _lparam):  # noqa: ANN001, ANN202 - ctypes callback
-        owner = wintypes.DWORD()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
-        if owner.value == pid:
-            hwnds.append(hwnd)
-        return True
-
-    user32.EnumWindows(_collect, 0)
-    for hwnd in hwnds:
-        user32.PostMessageW(hwnd, _WM_CLOSE, 0, 0)
-    return len(hwnds)
-
-
 _DURATION_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([hms]?)\s*$", re.IGNORECASE)
 _UNIT_SECONDS = {"h": 3600, "m": 60, "s": 1, "": 1}
 
@@ -156,8 +117,8 @@ class AndroidRecord(RecordBase):
         self._output_path: Path | None = None
         self._started_at: float | None = None
         self._stopped_at: float | None = None
-        # On Windows the auto-stop timeout is enforced in-process (see start());
-        # scrcpy's own --time-limit crashes when combined with a window.
+        # The auto-stop timeout is enforced in-process (see start()) rather than
+        # via scrcpy's --time-limit, so stop() always finalizes the recording.
         self._auto_stop_timer: threading.Timer | None = None
 
     @classmethod
@@ -206,8 +167,9 @@ class AndroidRecord(RecordBase):
 
         Args:
             timeout: Optional auto-stop duration; accepts seconds or a duration
-                string (``2h`` / ``30m`` / ``90s``). Maps to scrcpy
-                ``--time-limit``. ``None`` records until an explicit :meth:`stop`.
+                string (``2h`` / ``30m`` / ``90s``). Enforced in-process by a
+                watchdog that triggers :meth:`stop`. ``None`` records until an
+                explicit :meth:`stop`.
 
         Returns:
             dict: The recording status report (see :meth:`status`).
@@ -228,31 +190,29 @@ class AndroidRecord(RecordBase):
         is_windows = sys.platform == "win32"
         seconds = _parse_timeout_seconds(timeout)
 
-        command = [self._scrcpy_binary, "-s", self._device_udid]
+        command = [self._scrcpy_binary, "-s", self._device_udid, "--no-window"]
         if is_windows:
-            # On Windows scrcpy can only finalize the MP4 (write the trailing
-            # `moov` atom) when its window is closed via WM_CLOSE; a headless
-            # (`--no-playback`) process stopped by a console signal is killed
-            # before the muxer writes that footer, yielding an unplayable,
-            # zero-duration file. So keep the mirroring window and only suppress
-            # audio *playback* (the host may lack an audio device) while still
-            # recording the device's audio track. scrcpy's own `--time-limit`
-            # crashes when combined with a window, so the auto-stop timeout is
-            # enforced in-process below instead of on the CLI.
+            # Run headless. `--no-audio-playback` avoids requiring a host audio
+            # device (the machine may have none) while still recording the
+            # device's audio track. stop() finalizes the MP4 with a clean
+            # Ctrl+Break; that only works without scrcpy's `--time-limit`, which
+            # otherwise crashes the process during shutdown (no `moov` atom).
             command.append("--no-audio-playback")
         else:
             command.append("--no-playback")
         command += ["--record", str(output_path)]
-        if seconds is not None and not is_windows:
-            command.append(f"--time-limit={seconds}")
         command.extend(self._extra_args)
 
         logger.info(f"{_LOG_TAG} starting recording: {' '.join(command)}")
+        # A dedicated process group lets stop() deliver Ctrl+Break only to scrcpy
+        # (not this process) on Windows so it can finalize the container cleanly.
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if is_windows else 0
         try:
             self._process = subprocess.Popen(
                 command,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
+                creationflags=creationflags,
             )
         except OSError as exc:
             raise RecordServerError(f"{_LOG_TAG} failed to launch scrcpy: {exc}") from exc
@@ -260,7 +220,9 @@ class AndroidRecord(RecordBase):
         self._output_path = output_path
         self._started_at = time.time()
         self._stopped_at = None
-        if is_windows and seconds is not None:
+        # The auto-stop timeout is enforced in-process (rather than via scrcpy's
+        # `--time-limit`) so stop() always runs the clean finalization path.
+        if seconds is not None:
             self._auto_stop_timer = threading.Timer(seconds, self._auto_stop)
             self._auto_stop_timer.daemon = True
             self._auto_stop_timer.start()
@@ -271,7 +233,7 @@ class AndroidRecord(RecordBase):
         return self.status()
 
     def _auto_stop(self) -> None:
-        """Finalize the recording when the Windows in-process timeout elapses."""
+        """Finalize the recording when the in-process auto-stop timeout elapses."""
         if self._is_running():
             logger.info(f"{_LOG_TAG} auto-stop timeout reached for {self._device_udid}")
             try:
@@ -322,27 +284,15 @@ class AndroidRecord(RecordBase):
 
         wait_for = config.stop_timeout()
         try:
+            # Ask scrcpy to shut down cleanly so its muxer writes the MP4 footer
+            # (the `moov` atom); a hard kill leaves an unplayable file. On Windows
+            # Ctrl+Break reaches only scrcpy's own process group (see start()).
             if sys.platform == "win32":
-                # Poll briefly in case the window has not appeared yet, then ask
-                # scrcpy to close so it can write the MP4 footer (see
-                # _close_process_windows).
-                closed = 0
-                deadline = time.time() + 3.0
-                while time.time() < deadline:
-                    closed = _close_process_windows(process.pid)
-                    if closed:
-                        break
-                    time.sleep(0.1)
-                if not closed:
-                    logger.warning(
-                        f"{_LOG_TAG} no scrcpy window found to close; terminating "
-                        "(recording may be unplayable)"
-                    )
-                    process.terminate()
+                process.send_signal(signal.CTRL_BREAK_EVENT)
             else:
                 process.send_signal(signal.SIGINT)
         except (OSError, ValueError) as exc:
-            logger.warning(f"{_LOG_TAG} clean stop failed ({exc}); terminating")
+            logger.warning(f"{_LOG_TAG} clean stop signal failed ({exc}); terminating")
             process.terminate()
 
         try:
