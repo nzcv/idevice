@@ -116,7 +116,20 @@ class WindowsDevice(DeviceBase):
     def launch_app(self, app_id: str) -> None:
         if not app_id:
             raise ValueError("app_id is required and must be a non-empty string")
-        raise NotImplementedError("launch_app is not supported on Windows devices")
+        cached = self._app_cache.get(app_id)
+        if cached is None or not cached.path:
+            raise FileNotFoundError(f"App is not installed: {app_id}")
+        exe = Path(cached.path)
+        if not exe.exists():
+            raise FileNotFoundError(f"Exe not found: {exe}")
+        logger.info(f"Launching app on Windows device {self.device_id}: {exe}")
+        # Start-Process returns immediately, so the app runs detached instead of
+        # blocking the runner until the process exits.
+        script = (
+            f"Start-Process -FilePath {self._quote(str(exe))} "
+            f"-WorkingDirectory {self._quote(str(exe.parent))}"
+        )
+        self._run_powershell(script)
 
     def stop_app(self, app_id: str) -> None:
         if not app_id:
