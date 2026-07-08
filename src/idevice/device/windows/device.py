@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import platform
+import shutil
 from pathlib import Path
 
 from idevice.device.base.device import DeviceBase
@@ -184,33 +185,113 @@ class WindowsDevice(DeviceBase):
             / Path(self._package_name).stem
         )
 
-    def _documents_path(self, app_id: str) -> Path:
+    @staticmethod
+    def _require_app_and_remote(app_id: str, remote: str) -> None:
         if not app_id:
             raise ValueError("app_id is required and must be a non-empty string")
-        return self._doc_dir
+        if not remote:
+            raise ValueError("remote is required and must be a non-empty string")
+
+    def _documents_path(self, remote: str) -> Path:
+        """Resolve ``remote`` (relative to the Documents root) to a local path.
+
+        The Windows Documents sandbox is fixed at construction time (derived from
+        ``company_name`` / ``package_name``), so ``remote`` is always interpreted
+        relative to :attr:`_doc_dir`. Leading path separators are stripped so an
+        absolute-looking ``remote`` never escapes the sandbox.
+        """
+        rel = remote.strip().replace("\\", "/").lstrip("/")
+        if not rel or rel == ".":
+            return self._doc_dir
+        return self._doc_dir / rel
 
     def documents_exists(self, app_id: str, remote: str) -> bool:
-        del app_id, remote
-        raise NotImplementedError(
-            "documents_exists is not supported on Windows devices"
-        )
+        """Check whether ``remote`` (file or directory) exists in the sandbox."""
+        self._require_app_and_remote(app_id, remote)
+        path = self._documents_path(remote)
+        exists = path.exists()
+        logger.debug(f"{path} exists: {exists}")
+        return exists
 
     def documents_ls(self, app_id: str, remote: str) -> list[str]:
-        del app_id, remote
-        raise NotImplementedError("documents_ls is not supported on Windows devices")
+        """List entry names under ``remote`` in the sandbox.
+
+        When ``remote`` points to a file, the file's own name is returned so the
+        behaviour matches shell ``ls`` on both files and directories.
+        """
+        self._require_app_and_remote(app_id, remote)
+        path = self._documents_path(remote)
+        if not path.exists():
+            raise FileNotFoundError(f"Remote path not found: {path}")
+        logger.info(f"Listing {self.device_id}:{path}")
+        if path.is_dir():
+            return sorted(entry.name for entry in path.iterdir())
+        return [path.name]
 
     def documents_pull(self, app_id: str, remote: str, local: Path | str) -> bool:
-        del app_id, remote, local
-        raise NotImplementedError(
-            "documents_pull is not supported on Windows devices"
-        )
+        """Pull a file or directory from the sandbox to ``local``."""
+        self._require_app_and_remote(app_id, remote)
+        path = self._documents_path(remote)
+        if not path.exists():
+            logger.warning(f"Remote path not found: {self.device_id}:{path}")
+            return False
+        local_path = Path(local)
+        logger.info(f"Pulling {self.device_id}:{path} to {local_path}")
+        try:
+            if path.is_dir():
+                dest = local_path / path.name if local_path.is_dir() else local_path
+                shutil.copytree(path, dest, dirs_exist_ok=True)
+            else:
+                if local_path.is_dir():
+                    dest = local_path / path.name
+                else:
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
+                    dest = local_path
+                shutil.copy2(path, dest)
+        except OSError as exc:
+            logger.error(f"Failed to pull {path} to {local_path}: {exc}")
+            return False
+        return True
 
     def documents_push(self, app_id: str, local: Path | str, remote: str) -> bool:
-        del app_id, local, remote
-        raise NotImplementedError(
-            "documents_push is not supported on Windows devices"
-        )
+        """Push a local file or directory into the sandbox at ``remote``."""
+        self._require_app_and_remote(app_id, remote)
+        local_path = Path(local)
+        if not local_path.exists():
+            logger.warning(f"Local path not found: {local_path}")
+            return False
+        dest = self._documents_path(remote)
+        logger.info(f"Pushing {local_path} to {self.device_id}:{dest}")
+        try:
+            if local_path.is_dir():
+                target = dest / local_path.name if dest.is_dir() else dest
+                shutil.copytree(local_path, target, dirs_exist_ok=True)
+            else:
+                if dest.is_dir():
+                    target = dest / local_path.name
+                else:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    target = dest
+                shutil.copy2(local_path, target)
+        except OSError as exc:
+            logger.error(f"Failed to push {local_path} to {dest}: {exc}")
+            return False
+        return True
 
     def documents_rm(self, app_id: str, remote: str) -> bool:
-        del app_id, remote
-        raise NotImplementedError("documents_rm is not supported on Windows devices")
+        """Remove a file or directory from the sandbox."""
+        self._require_app_and_remote(app_id, remote)
+        path = self._documents_path(remote)
+        if not path.exists():
+            logger.warning(f"Remote path not found: {self.device_id}:{path}")
+            return False
+        logger.info(f"Removing {self.device_id}:{path}")
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        except OSError as exc:
+            logger.error(f"Failed to remove {path}: {exc}")
+            return False
+        return True
