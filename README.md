@@ -14,7 +14,7 @@ The package ships two complementary APIs:
 | iOS | [go-ios](https://github.com/danielpaulus/go-ios) (`IOSDevice`) | Yes | Yes | — | — | Planned (WDA) |
 | iOS | [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) (`IOSDevice3`) | Yes | Yes (AFC + app sandbox) | Yes | — | Planned (WDA) |
 | Android | adb (`AndroidDevice`) | Yes | Yes | — | Yes | Yes (`AndroidUIAuto`) |
-| Windows | PowerShell (`WindowsDevice`) | Partial | — | — | — | Planned |
+| Windows | PowerShell (`WindowsDevice`) | Partial | — | Yes (local filesystem) | — | Planned |
 
 macOS and HarmonyOS are not implemented yet.
 
@@ -77,6 +77,29 @@ device.documents_pull("com.example.app", "Logs", Path("out/Logs"))
 device.documents_rm("com.example.app", "Logs/log.txt")
 ```
 
+Windows Documents sandbox (`WindowsDevice` — backed by the local filesystem under
+`%LocalAppData%/<company_name>/<package_name>`). The sandbox root is fixed at
+construction, so `company_name` and `package_name` are required; `remote` is
+always resolved relative to that root, and every method works on both files and
+directories:
+
+```python
+device = Device.create(
+    Platform.WINDOWS,
+    device_id="MY-PC",
+    device_ip="",
+    company_name="MyCompany",
+    package_name="MyApp",
+)
+
+device.documents_push("MyApp.exe", Path("log.txt"), "Logs/log.txt")
+device.documents_push("MyApp.exe", Path("assets"), "assets")  # whole directory
+device.documents_exists("MyApp.exe", "Logs/log.txt")
+device.documents_ls("MyApp.exe", "Logs")
+device.documents_pull("MyApp.exe", "Logs", Path("out/Logs"))
+device.documents_rm("MyApp.exe", "Logs")
+```
+
 ## Examples
 
 Runnable scripts under `examples/` auto-detect the first connected device when no ID is passed:
@@ -111,7 +134,7 @@ Every platform implementation shares the same interface:
 - `launch_app(app_id)` / `stop_app(app_id)`
 - `push(local, remote, app_id=None, documents_only=False)` / `pull(remote, local, app_id=None, documents_only=True)` — host ↔ device file transfer
 - `ls(remote, app_id=None, recursive=False)` — list a remote directory on the device
-- `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox (implemented on `IOSDevice3`; other platforms raise `NotImplementedError`)
+- `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox, supporting both files and directories (implemented on `IOSDevice3` and `WindowsDevice`; other platforms raise `NotImplementedError`)
 - `swipe(x1, y1, x2, y2, duration_ms=300)` — touch gesture (Android implemented; iOS/Windows raise `NotImplementedError`)
 - `host_is_running()` — whether WebDriverAgent / UIAutomator2 host process is up
 
