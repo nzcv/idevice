@@ -15,7 +15,7 @@ Examples:
         --package com.example.app
 
     # Explicit serial and verbose logging
-    uv run python examples/android_device.py --serial e8b2b043 -v
+    uv run python examples/android_device.py --serial emulator-5554 -v
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from idevice.device.device import Device
 
 DEFAULT_LAUNCH_PACKAGE = "com.android.settings"
 DEFAULT_REMOTE = "/sdcard/Download/idevice_android_example.txt"
-DEFAULT_DOCUMENTS_PACKAGE = "com.hypergryph.endfield.beyondtest2"
+DEFAULT_DOCUMENTS_PACKAGE = "com.example.app"
 
 logger = logging.getLogger(__name__)
 

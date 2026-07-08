@@ -15,7 +15,7 @@ Optional: dismiss OEM post-install dialogs after install:
 
 ```bash
 uv run python examples/android_device_install.py \
-  --serial e8b2b043 \
+  --serial emulator-5554 \
   --apk tests/apk/app.apk \
   --package com.Unity.TrashDash \
   --dismiss-dialogs
@@ -28,7 +28,7 @@ from pathlib import Path
 
 from idevice.device.android.device import AndroidDevice
 
-device = AndroidDevice("e8b2b043")
+device = AndroidDevice("emulator-5554")
 device.install(Path("tests/apk/app.apk"), app_id="com.Unity.TrashDash")
 assert device.is_installed("com.Unity.TrashDash")
 ```

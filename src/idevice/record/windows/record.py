@@ -69,11 +69,11 @@ def _find_window_title(app: str) -> str | None:
 
     ``gdigrab`` can only target a window by its *title* (``title=<name>``), but
     the automation framework identifies apps by exe/package name (e.g.
-    ``Endfield.exe``). This resolves the currently-running process' main window
+    ``MyApp.exe``). This resolves the currently-running process' main window
     title so a bare app name can be turned into a valid gdigrab target.
 
     Args:
-        app: An exe or process name (``Endfield.exe`` / ``Endfield``).
+        app: An exe or process name (``MyApp.exe`` / ``MyApp``).
 
     Returns:
         The process' non-empty main window title, or ``None`` when the process
@@ -265,7 +265,7 @@ class WindowsRecord(RecordBase):
         seconds = _parse_timeout_seconds(timeout)
 
         # gdigrab needs `desktop` / `title=<...>` / `hwnd=<...>`; a bare app name
-        # (e.g. `Endfield.exe`) is resolved to its window title, falling back to
+        # (e.g. `MyApp.exe`) is resolved to its window title, falling back to
         # whole-desktop capture so ffmpeg never fails to open its input.
         target = _resolve_gdigrab_target(self._input)
 

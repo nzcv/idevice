@@ -83,7 +83,7 @@ class AndroidDevice(DeviceBase):
 
             from idevice.device.android.device import AndroidDevice
 
-            device = AndroidDevice("e8b2b043")
+            device = AndroidDevice("emulator-5554")
             apk = Path("tests/apk/app.apk")
             device.install(apk, app_id="com.example.app")
             assert device.is_installed("com.example.app")
@@ -91,8 +91,8 @@ class AndroidDevice(DeviceBase):
         logger.info(f"[AndroidDevice] Installing package on {self.device_id}: {package_path}")
         if not package_path.exists():
             raise FileNotFoundError(f"Package not found: {package_path}")
-        
-        # Existing package com.hypergryph.beyondtest signatures do not match newer version
+
+        # Uninstall any existing package so signature mismatches do not block install.
         try:
             self.uninstall(app_id)
         except Exception as exc:

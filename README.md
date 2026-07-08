@@ -157,9 +157,9 @@ from idevice.host import Host
 # Explicit
 host = Host.create(
     host_type="macos",
-    keeper_ip="192.168.1.7",
-    device_udid="00008120-00123D323",
-    device_ip="192.168.1.5",
+    keeper_ip="192.168.0.10",
+    device_udid="00000000-0000000000000000",
+    device_ip="192.168.0.20",
     bundle_id="com.example.app",
 )
 

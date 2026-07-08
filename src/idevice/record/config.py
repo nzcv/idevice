@@ -169,7 +169,7 @@ def ffmpeg_input() -> str:
     Defaults to ``desktop`` (whole-screen capture). ``gdigrab`` itself only
     accepts ``desktop`` | ``title=<window title>`` | ``hwnd=<hwnd>``; the Windows
     recorder additionally treats a bare app/exe name (the controller injects the
-    app under test as ``GAUTO_PACKAGE_NAME``, e.g. ``Endfield.exe``) by resolving
+    app under test as ``GAUTO_PACKAGE_NAME``, e.g. ``MyApp.exe``) by resolving
     it to that app's window title, and falls back to ``desktop`` when no window
     is found.
     """
