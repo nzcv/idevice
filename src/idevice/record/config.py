@@ -164,13 +164,13 @@ def ffmpeg_extra_args() -> list[str]:
 
 
 def ffmpeg_input() -> str:
-    """Return the ``gdigrab`` capture target (``GAUTO_PACKAGE_NAME``).
+    """Return the foreground-activation target (``GAUTO_PACKAGE_NAME``).
 
-    Defaults to ``desktop`` (whole-screen capture). ``gdigrab`` itself only
-    accepts ``desktop`` | ``title=<window title>`` | ``hwnd=<hwnd>``; the Windows
-    recorder additionally treats a bare app/exe name (the controller injects the
-    app under test as ``GAUTO_PACKAGE_NAME``, e.g. ``MyApp.exe``) by resolving
-    it to that app's window title, and falls back to ``desktop`` when no window
-    is found.
+    The Windows recorder captures the primary monitor via ``ddagrab`` (not a
+    specific window), so this value is no longer an ffmpeg capture target;
+    instead it names the app whose window is brought to the foreground before
+    recording starts. The controller injects the app under test as
+    ``GAUTO_PACKAGE_NAME`` (e.g. ``MyApp.exe``). Defaults to ``desktop``, which
+    means "record the primary monitor as-is without foregrounding any app".
     """
     return os.environ.get("GAUTO_PACKAGE_NAME", "desktop")
