@@ -122,5 +122,72 @@ def test_documents_path_matches_documents_root(windows_device) -> None:
         Path.home() / "AppData" / "Local" / COMPANY_NAME / Path(PACKAGE_NAME).stem
     )
     assert device._documents_root() == expected
-    assert device._documents_path(APP_ID) == expected
+    assert device._documents_path(".") == expected
+    assert device._documents_path("/") == expected
+
+
+def test_documents_path_resolves_relative_remote(windows_device) -> None:
+    device, _runner, _app_dir = windows_device
+    root = device._documents_root()
+    assert device._documents_path("sub/file.txt") == root / "sub" / "file.txt"
+    assert device._documents_path("\\sub\\file.txt") == root / "sub" / "file.txt"
+
+
+def test_documents_require_app_and_remote_rejects_empty(windows_device) -> None:
+    device, _runner, _app_dir = windows_device
+    with pytest.raises(ValueError, match="app_id is required"):
+        device.documents_exists("", "file.txt")
+    with pytest.raises(ValueError, match="remote is required"):
+        device.documents_exists(APP_ID, "")
+
+
+def test_documents_roundtrip_file(windows_device, tmp_path: Path) -> None:
+    device, _runner, _app_dir = windows_device
+    device._doc_dir = tmp_path / "docroot"
+    src = tmp_path / "src.txt"
+    src.write_text("hello")
+
+    assert device.documents_push(APP_ID, src, "data/src.txt") is True
+    assert device.documents_exists(APP_ID, "data/src.txt") is True
+    assert device.documents_ls(APP_ID, "data") == ["src.txt"]
+
+    out = tmp_path / "out.txt"
+    assert device.documents_pull(APP_ID, "data/src.txt", out) is True
+    assert out.read_text() == "hello"
+
+    assert device.documents_rm(APP_ID, "data/src.txt") is True
+    assert device.documents_exists(APP_ID, "data/src.txt") is False
+
+
+def test_documents_roundtrip_directory(windows_device, tmp_path: Path) -> None:
+    device, _runner, _app_dir = windows_device
+    device._doc_dir = tmp_path / "docroot"
+    src_dir = tmp_path / "tree"
+    (src_dir / "nested").mkdir(parents=True)
+    (src_dir / "a.txt").write_text("a")
+    (src_dir / "nested" / "b.txt").write_text("b")
+
+    assert device.documents_push(APP_ID, src_dir, "tree") is True
+    assert device.documents_exists(APP_ID, "tree/nested/b.txt") is True
+    assert device.documents_ls(APP_ID, "tree") == ["a.txt", "nested"]
+
+    out_dir = tmp_path / "pulled"
+    assert device.documents_pull(APP_ID, "tree", out_dir) is True
+    assert (out_dir / "a.txt").read_text() == "a"
+    assert (out_dir / "nested" / "b.txt").read_text() == "b"
+
+    assert device.documents_rm(APP_ID, "tree") is True
+    assert device.documents_exists(APP_ID, "tree") is False
+
+
+def test_documents_pull_missing_returns_false(windows_device, tmp_path: Path) -> None:
+    device, _runner, _app_dir = windows_device
+    device._doc_dir = tmp_path / "docroot"
+    assert device.documents_pull(APP_ID, "nope.txt", tmp_path / "out.txt") is False
+
+
+def test_documents_rm_missing_returns_false(windows_device, tmp_path: Path) -> None:
+    device, _runner, _app_dir = windows_device
+    device._doc_dir = tmp_path / "docroot"
+    assert device.documents_rm(APP_ID, "nope.txt") is False
 
