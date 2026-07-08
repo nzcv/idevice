@@ -80,6 +80,8 @@ class Device(metaclass=_DeviceMeta):
         *,
         device_id: str,
         device_ip: str,
+        company_name: str = "",
+        package_name: str = "",
     ) -> DeviceBase:
         """Create a device instance bound to ``device_id`` for ``platform``.
 
@@ -88,6 +90,8 @@ class Device(metaclass=_DeviceMeta):
                 ``windows``), as a :class:`Platform` member or its string value.
             device_id: Device id (UDID / serial). Required and non-empty.
             device_ip: Device IP address, or an empty string when not applicable.
+            company_name: Windows-only publisher folder under ``%LocalAppData%``.
+            package_name: Windows-only package id used to resolve the documents root.
 
         Returns:
             DeviceBase: The platform-specific device implementation.
@@ -104,7 +108,12 @@ class Device(metaclass=_DeviceMeta):
         elif p is Platform.ANDROID:
             device = AndroidDevice(device_id, device_ip=device_ip)
         elif p is Platform.WINDOWS:
-            device = WindowsDevice(device_id, device_ip=device_ip)
+            device = WindowsDevice(
+                device_id,
+                device_ip=device_ip,
+                company_name=company_name,
+                package_name=package_name,
+            )
         else:
             raise ValueError(f"Unsupported platform: {platform}")
         logger.info(f"Created {type(device).__name__} for device_id={device.device_id}")
@@ -115,11 +124,12 @@ class Device(metaclass=_DeviceMeta):
     def from_env(cls) -> DeviceBase:
         """Build a device from the ``GAUTO_*`` environment variables.
 
-        Reads ``GAUTO_PLATFORM``, ``GAUTO_DEVICE_UDID`` and ``GAUTO_DEVICE_IP``.
+        Reads ``GAUTO_PLATFORM``, ``GAUTO_DEVICE_UDID``, ``GAUTO_DEVICE_IP``,
+        and on Windows also ``GAUTO_COMPANY_NAME`` / ``GAUTO_PACKAGE_NAME``.
 
         Unlike :meth:`create`, this never raises on a missing/blank environment:
-        when ``GAUTO_PLATFORM`` or ``GAUTO_DEVICE_UDID`` is empty (or the
-        platform is unsupported) it logs the reason and returns a no-op
+        when required ``GAUTO_*`` variables are empty (or the platform is
+        unsupported) it logs the reason and returns a no-op
         :class:`DummyDevice`. ``GAUTO_DEVICE_IP`` may be empty because not all
         platforms use it. The result (real or dummy) is bound as
         :attr:`Device.Instance`, so callers can always reach it there.
@@ -132,15 +142,20 @@ class Device(metaclass=_DeviceMeta):
         platform = config.platform()
         device_id = config.device_id()
         device_ip = config.device_ip()
-
-        missing = [
-            name
-            for name, value in (
-                ("GAUTO_PLATFORM", platform),
-                ("GAUTO_DEVICE_UDID", device_id),
-            )
-            if not value
+        company_name = config.company_name()
+        package_name = config.package_name()
+        required_env: list[tuple[str, str]] = [
+            ("GAUTO_PLATFORM", platform),
+            ("GAUTO_DEVICE_UDID", device_id),
         ]
+        if platform.lower() in {Platform.WINDOWS.value, "windows"}:
+            required_env.extend(
+                [
+                    ("GAUTO_COMPANY_NAME", company_name),
+                    ("GAUTO_PACKAGE_NAME", package_name),
+                ]
+            )
+        missing = [name for name, value in required_env if not value]
         if missing:
             reason = f"missing/blank env var(s): {', '.join(missing)}"
             return cls._bind_dummy(reason, platform, device_id, device_ip)
@@ -150,6 +165,8 @@ class Device(metaclass=_DeviceMeta):
                 platform=platform,
                 device_id=device_id,
                 device_ip=device_ip,
+                company_name=company_name,
+                package_name=package_name,
             )
         except ValueError as exc:
             return cls._bind_dummy(

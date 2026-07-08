@@ -13,6 +13,8 @@ from idevice.device.windows.device import WindowsDevice
 PKG_NAME = "MyApp_v1.zip"
 PKG_VERSION = "MyApp_v1"
 APP_ID = "App.exe"
+COMPANY_NAME = "TestCo"
+PACKAGE_NAME = "App.exe"
 
 
 @pytest.fixture
@@ -23,7 +25,12 @@ def windows_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     with patch(
         "idevice.device.windows.device.SubprocessRunner", return_value=runner
     ):
-        device = WindowsDevice("local", cache_dir=tmp_path)
+        device = WindowsDevice(
+            "local",
+            company_name=COMPANY_NAME,
+            package_name=PACKAGE_NAME,
+            cache_dir=tmp_path,
+        )
     return device, runner, tmp_path
 
 
@@ -100,3 +107,20 @@ def test_quote_escapes_single_quotes() -> None:
     assert WindowsDevice._quote("plain") == "'plain'"
     assert WindowsDevice._quote("O'Brien") == "'O''Brien'"
     assert WindowsDevice._quote("C:\\a b\\c") == "'C:\\a b\\c'"
+
+
+def test_rejects_empty_company_or_package_name() -> None:
+    with pytest.raises(ValueError, match="company_name"):
+        WindowsDevice("local", company_name="", package_name=PACKAGE_NAME)
+    with pytest.raises(ValueError, match="package_name"):
+        WindowsDevice("local", company_name=COMPANY_NAME, package_name="")
+
+
+def test_documents_path_matches_documents_root(windows_device) -> None:
+    device, _runner, _app_dir = windows_device
+    expected = (
+        Path.home() / "AppData" / "Local" / COMPANY_NAME / Path(PACKAGE_NAME).stem
+    )
+    assert device._documents_root() == expected
+    assert device._documents_path(APP_ID) == expected
+

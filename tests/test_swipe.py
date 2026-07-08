@@ -46,6 +46,6 @@ def test_ios_device_swipe_not_implemented() -> None:
 
 
 def test_windows_device_swipe_not_implemented() -> None:
-    device = WindowsDevice("local")
+    device = WindowsDevice("local", company_name="TestCo", package_name="App.exe")
     with pytest.raises(NotImplementedError, match="swipe"):
         device.swipe(0, 0, 100, 100)

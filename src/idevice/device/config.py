@@ -53,3 +53,13 @@ def device_id() -> str:
 def device_ip() -> str:
     """Return the target device IP (``GAUTO_DEVICE_IP``)."""
     return os.environ.get("GAUTO_DEVICE_IP", "")
+
+
+def company_name() -> str:
+    """Return the company name (``GAUTO_COMPANY_NAME``)."""
+    return os.environ.get("GAUTO_COMPANY_NAME", "")
+
+
+def package_name() -> str:
+    """Return the package name (``GAUTO_PACKAGE_NAME``)."""
+    return os.environ.get("GAUTO_PACKAGE_NAME", "")

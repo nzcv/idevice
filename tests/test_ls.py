@@ -109,6 +109,6 @@ def test_android_device_ls_runs_adb_shell(mock_adb_on_path: None) -> None:
 
 
 def test_windows_device_ls_not_implemented() -> None:
-    device = WindowsDevice("local")
+    device = WindowsDevice("local", company_name="TestCo", package_name="App.exe")
     with pytest.raises(NotImplementedError, match="ls"):
         device.ls("/")

@@ -23,13 +23,22 @@ class WindowsDevice(DeviceBase):
         device_id: str,
         *,
         device_ip: str = "",
+        company_name: str,
+        package_name: str,
         cache_dir: Path | None = None,
     ) -> None:
         super().__init__(device_id, device_ip, platform="windows")
         self._runner = SubprocessRunner()
+        self._package_name = package_name
+        self._company_name = company_name
+        if not self._company_name:
+            raise ValueError("company_name is required and must be a non-empty string")
+        if not self._package_name:
+            raise ValueError("package_name is required and must be a non-empty string")
         self._app_cache = InstalledAppCache(device_id, cache_dir=cache_dir)
         _app_dir = os.environ.get("IDEVICE_APP_DIR", "D:\\IDeviceExtractedApps")
         self._app_dir = Path(_app_dir)
+        self._doc_dir = self._documents_root()
 
     @classmethod
     def default_udid(cls) -> str:
@@ -164,6 +173,21 @@ class WindowsDevice(DeviceBase):
     ) -> list[str]:
         del remote, app_id, recursive
         raise NotImplementedError("ls is not supported on Windows devices")
+
+    def _documents_root(self) -> Path:
+        """Return the app's LocalAppData documents directory."""
+        return (
+            Path.home()
+            / "AppData"
+            / "Local"
+            / self._company_name
+            / Path(self._package_name).stem
+        )
+
+    def _documents_path(self, app_id: str) -> Path:
+        if not app_id:
+            raise ValueError("app_id is required and must be a non-empty string")
+        return self._doc_dir
 
     def documents_exists(self, app_id: str, remote: str) -> bool:
         del app_id, remote
