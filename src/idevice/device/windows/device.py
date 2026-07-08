@@ -180,7 +180,7 @@ class WindowsDevice(DeviceBase):
         return (
             Path.home()
             / "AppData"
-            / "Local"
+            / "LocalLow"
             / self._company_name
             / Path(self._package_name).stem
         )
