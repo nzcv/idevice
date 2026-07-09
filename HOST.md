@@ -27,7 +27,7 @@ test script (idevice.host.Host)
                               GET /api/measuring/stop
                               GET /api/measuring/status
                               /api/launch, /api/activate, /api/terminate,
-                              /api/screenshot, /api/screenshot/start, /api/screenshot/stop, /api/exit
+                              /api/screenshot, /api/exit
 ```
 
 The host **only** talks to the keeper. Runner calls go through the keeper's

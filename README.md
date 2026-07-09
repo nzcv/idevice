@@ -205,7 +205,7 @@ The most recently built host is also reachable anywhere via `Host.Instance`.
 ### Lower-level clients
 
 - **`Keeper`** — thin HTTP client for the EndlessKeeper control server (`/api/runs` routes): `launch`, `launch_app`, `status`, `list_runs`, `kill`, `export`, `health`.
-- **`Runner`** — thin HTTP client for the on-device runner, reached through the keeper proxy: `launch_app`, `activate`, `terminate`, `start_measuring` / `stop_measuring` / `measuring_status`, `dt_measuring`, `screenshot` (+ periodic), `tap`, `exit`, `health`.
+- **`Runner`** — thin HTTP client for the on-device runner, reached through the keeper proxy: `launch_app`, `activate`, `terminate`, `start_measuring` / `stop_measuring` / `measuring_status`, `dt_measuring`, `screenshot`, `tap`, `exit`, `health`.
 
 ## Configuration
 

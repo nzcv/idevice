@@ -134,26 +134,6 @@ class Runner:
             self._get(f"/api/measuring/period/{seconds}", params={"bundleId": bundle_id})
         )
 
-    def start_periodic_screenshots(
-        self, interval: float = 1.0, limit: int | None = None
-    ) -> dict:
-        """Begin periodic screenshots (``/api/screenshot/start``).
-
-        Args:
-            interval: Seconds between captures (server default ``1``).
-            limit: Stop after this many captures; ``None`` / ``0`` is unlimited.
-        """
-        if interval <= 0:
-            raise ValueError("interval must be positive")
-        params: dict = {"interval": interval}
-        if limit:
-            params["limit"] = limit
-        return self._json(self._get("/api/screenshot/start", params=params))
-
-    def stop_periodic_screenshots(self) -> dict:
-        """Stop periodic screenshots (``/api/screenshot/stop``)."""
-        return self._json(self._get("/api/screenshot/stop"))
-
     def screenshot(self, dest_path: Path | str) -> Path:
         """Capture one screenshot and write it to ``dest_path`` (``/api/screenshot``).
 
