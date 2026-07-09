@@ -1,5 +1,4 @@
-﻿# -*- coding: utf-8 -*-
-"""Windows ffmpeg-backed :class:`RecordBase` implementation.
+﻿"""Windows ffmpeg-backed :class:`RecordBase` implementation.
 
 Runs on the **Windows host** itself: :class:`WindowsRecord` shells out to the
 ``ffmpeg`` CLI to capture a video-only recording of the local desktop via the
@@ -277,7 +276,7 @@ def _load_cached_profile(signature: str) -> _EncoderProfile | None:
     """
     path = config.ffmpeg_encoder_cache_file()
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
     except (OSError, ValueError):
         return None
@@ -301,7 +300,7 @@ def _store_cached_profile(signature: str, profile: _EncoderProfile) -> None:
     path = config.ffmpeg_encoder_cache_file()
     data: dict[str, str] = {}
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             loaded = json.load(fh)
         if isinstance(loaded, dict):
             data = {k: v for k, v in loaded.items() if isinstance(k, str) and isinstance(v, str)}

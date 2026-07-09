@@ -119,7 +119,7 @@ def test_rejects_empty_company_or_package_name() -> None:
 def test_documents_path_matches_documents_root(windows_device) -> None:
     device, _runner, _app_dir = windows_device
     expected = (
-        Path.home() / "AppData" / "Local" / COMPANY_NAME / Path(PACKAGE_NAME).stem
+        Path.home() / "AppData" / "LocalLow" / COMPANY_NAME / Path(PACKAGE_NAME).stem
     )
     assert device._documents_root() == expected
     assert device._documents_path(".") == expected
