@@ -8,19 +8,26 @@ Runs on the **Windows host** itself: :class:`WindowsRecord` shells out to the
 recorder there is no control server, so ``server_ip`` / ``server_port`` are
 unused; the recorder simply supervises a local ``ffmpeg`` subprocess (this
 mirrors the Android scrcpy recorder).
+
+``ddagrab`` returns Direct3D11 GPU frames, so the recorder auto-selects the
+cheapest encoder available (see :func:`_select_encoder_profile`): a GPU
+hardware encoder (NVENC / AMF / QSV) keeps the frames in VRAM for near-zero CPU
+cost, while the CPU fallback copies frames back to system memory
+(``hwdownload``) and encodes with ``libx264``.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import shutil
 import subprocess
 import threading
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import IO
 
 from idevice.record import config
 from idevice.record.base.errors import RecordError, RecordServerError
@@ -32,6 +39,320 @@ _LOG_TAG = "[WindowsRecord]"
 
 _DURATION_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([hms]?)\s*$", re.IGNORECASE)
 _UNIT_SECONDS = {"h": 3600, "m": 60, "s": 1, "": 1}
+
+# `ffmpeg -encoders` prints one encoder per line as `<6 flag chars> <name> <desc>`
+# (e.g. ` V....D hevc_nvenc  NVIDIA NVENC hevc encoder`); this matches the flag
+# column so the encoder id can be extracted from the second token.
+_ENCODER_LINE_RE = re.compile(r"^\s*[A-Z.]{6}\s+(\S+)")
+
+
+@dataclass(frozen=True)
+class _EncoderProfile:
+    """A candidate ffmpeg encoder configuration for ``ddagrab`` capture.
+
+    Attributes:
+        key: Short human-facing name used for selection/logging (e.g. ``nvenc``).
+        encoder: The ffmpeg encoder id probed against ``ffmpeg -encoders``.
+        hardware: ``True`` for GPU encoders that consume ``ddagrab`` D3D11 frames
+            directly (no ``hwdownload``); ``False`` for the CPU fallback.
+        init_args: Args emitted *before* ``-f lavfi`` (e.g. QSV device init).
+        input_filters: Filter chain appended to the ``ddagrab`` source string.
+            Empty for GPU encoders (zero-copy); the CPU profile downloads and
+            converts frames here.
+        codec_args: The ``-c:v`` / quality args emitted after the input.
+    """
+
+    key: str
+    encoder: str
+    hardware: bool
+    init_args: tuple[str, ...] = ()
+    input_filters: str = ""
+    codec_args: tuple[str, ...] = field(default_factory=tuple)
+
+
+# Hardware encoders are tried in order of decreasing prevalence for automation
+# hosts (NVIDIA -> AMD -> Intel). All emit HEVC to match the previous libx265
+# output. NVENC and AMF ingest ddagrab's D3D11 frames directly; QSV needs an
+# explicit device init plus a hwmap into a QSV frames context.
+_HW_ENCODER_PROFILES: tuple[_EncoderProfile, ...] = (
+    _EncoderProfile(
+        key="nvenc",
+        encoder="hevc_nvenc",
+        hardware=True,
+        codec_args=("-c:v", "hevc_nvenc", "-preset", "p5", "-cq", "24"),
+    ),
+    _EncoderProfile(
+        key="amf",
+        encoder="hevc_amf",
+        hardware=True,
+        codec_args=(
+            "-c:v", "hevc_amf",
+            "-quality", "balanced",
+            "-rc", "cqp",
+            "-qp_i", "24",
+            "-qp_p", "24",
+        ),
+    ),
+    _EncoderProfile(
+        key="qsv",
+        encoder="hevc_qsv",
+        hardware=True,
+        init_args=(
+            "-init_hw_device", "qsv=hw,child_device_type=dxva2",
+            "-filter_hw_device", "hw",
+        ),
+        input_filters=",hwmap=derive_device=qsv,format=qsv",
+        codec_args=("-c:v", "hevc_qsv", "-global_quality", "24"),
+    ),
+)
+
+# CPU fallback: copy frames out of VRAM (`hwdownload`), declare ddagrab's 8-bit
+# BGRA layout, convert to yuv420p, then encode with libx264 (lighter than
+# libx265 at an equivalent preset).
+_CPU_ENCODER_PROFILE = _EncoderProfile(
+    key="cpu",
+    encoder="libx264",
+    hardware=False,
+    input_filters=",hwdownload,format=bgra,format=yuv420p",
+    codec_args=(
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "22",
+        "-pix_fmt", "yuv420p",
+    ),
+)
+
+# Every profile keyed by its short name, for reverse lookup when restoring a
+# persisted selection (see :func:`_load_cached_profile`).
+_ALL_PROFILES: dict[str, _EncoderProfile] = {
+    profile.key: profile for profile in (*_HW_ENCODER_PROFILES, _CPU_ENCODER_PROFILE)
+}
+
+# Probing `ffmpeg -encoders` is stable per binary for a process' lifetime, so
+# the result is memoized per ffmpeg path to avoid repeated subprocess launches.
+_ENCODER_CACHE: dict[str, frozenset[str]] = {}
+
+# Whether a given profile's full ddagrab->encoder chain actually runs (see
+# :func:`_profile_usable`), memoized per ``(ffmpeg_binary, profile key)``.
+_ENCODER_USABLE_CACHE: dict[tuple[str, str], bool] = {}
+
+# Frame rate used only for the throwaway probe capture; it does not affect
+# device init, so a fixed value keeps probe results cache-stable.
+_PROBE_FRAMERATE = 30
+
+# Subprocess timeouts (seconds) for the encoder probes. A one-frame ddagrab
+# capture completes in ~1-2s on a healthy host, so these are kept tight to bound
+# the worst-case cold-cache `_select_encoder_profile` cost (see module notes).
+_ENCODERS_LIST_TIMEOUT = 10
+_PROBE_TIMEOUT = 6
+
+
+def _available_encoders(ffmpeg_binary: str) -> frozenset[str]:
+    """Return the set of encoder ids reported by ``ffmpeg -encoders``.
+
+    The result is cached per ``ffmpeg_binary`` path. On any failure an empty set
+    is returned (and cached), which makes callers fall back to CPU encoding.
+
+    Args:
+        ffmpeg_binary: The ffmpeg CLI path/name to probe.
+
+    Returns:
+        A frozenset of available encoder ids (e.g. ``{"libx264", "hevc_nvenc"}``).
+    """
+    cached = _ENCODER_CACHE.get(ffmpeg_binary)
+    if cached is not None:
+        return cached
+
+    encoders: set[str] = set()
+    try:
+        result = subprocess.run(
+            [ffmpeg_binary, "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=_ENCODERS_LIST_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning(f"{_LOG_TAG} could not probe ffmpeg encoders: {exc}")
+        frozen = frozenset()
+        _ENCODER_CACHE[ffmpeg_binary] = frozen
+        return frozen
+
+    for line in result.stdout.splitlines():
+        match = _ENCODER_LINE_RE.match(line)
+        if match:
+            encoders.add(match.group(1))
+
+    frozen = frozenset(encoders)
+    _ENCODER_CACHE[ffmpeg_binary] = frozen
+    return frozen
+
+
+def _profile_usable(ffmpeg_binary: str, profile: _EncoderProfile) -> bool:
+    """Return ``True`` if ``profile``'s full ddagrab->encoder chain actually runs.
+
+    ``ffmpeg -encoders`` only reports what the *build* supports, so a hardware
+    encoder (e.g. ``hevc_nvenc``) is listed even when the matching GPU is
+    absent. Moreover an encoder can init from CPU frames yet still fail to
+    derive its device context from ``ddagrab``'s D3D11 frames (observed with
+    ``hevc_amf`` on hosts without a compatible Radeon device). This therefore
+    probes the *exact* pipeline -- init args, the ddagrab source with the
+    profile's input filters, and the profile's codec args -- capturing a single
+    frame to a null muxer. A non-zero exit means the chain is unusable on this
+    host. Results are cached per profile.
+
+    Args:
+        ffmpeg_binary: The ffmpeg CLI path/name.
+        profile: The encoder profile whose capture->encode chain is validated.
+
+    Returns:
+        ``True`` if the one-frame probe succeeded, ``False`` otherwise.
+    """
+    key = (ffmpeg_binary, profile.key)
+    cached = _ENCODER_USABLE_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    command = [ffmpeg_binary, "-hide_banner", "-loglevel", "error"]
+    command.extend(profile.init_args)
+    command += [
+        "-f", "lavfi",
+        "-i", f"ddagrab=output_idx=0:framerate={_PROBE_FRAMERATE}{profile.input_filters}",
+        "-frames:v", "1",
+    ]
+    command.extend(profile.codec_args)
+    command += ["-f", "null", "-"]
+
+    usable = False
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=_PROBE_TIMEOUT
+        )
+        usable = result.returncode == 0
+        if not usable:
+            logger.debug(
+                f"{_LOG_TAG} encoder {profile.encoder!r} failed ddagrab probe: "
+                f"{result.stderr.strip()[:300]}"
+            )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.debug(f"{_LOG_TAG} probing encoder {profile.encoder!r} failed: {exc}")
+
+    _ENCODER_USABLE_CACHE[key] = usable
+    return usable
+
+
+def _ffmpeg_signature(ffmpeg_binary: str) -> str:
+    """Return a stable identity for ``ffmpeg_binary`` used as a disk-cache key.
+
+    Combines the resolved path with the binary's size and mtime so that an
+    ffmpeg upgrade (which may add/remove encoder support) invalidates a
+    previously persisted selection.
+
+    Args:
+        ffmpeg_binary: The ffmpeg CLI path/name.
+
+    Returns:
+        A signature string; falls back to the bare path when the binary cannot
+        be stat'd.
+    """
+    resolved = shutil.which(ffmpeg_binary) or ffmpeg_binary
+    try:
+        info = Path(resolved).stat()
+        return f"{resolved}|{info.st_size}|{int(info.st_mtime)}"
+    except OSError:
+        return resolved
+
+
+def _load_cached_profile(signature: str) -> _EncoderProfile | None:
+    """Return the persisted encoder profile for ``signature``, or ``None``.
+
+    Reads :func:`idevice.record.config.ffmpeg_encoder_cache_file`; any missing
+    file, malformed JSON, or unknown profile key yields ``None`` so the caller
+    falls back to live probing.
+
+    Args:
+        signature: The ffmpeg identity from :func:`_ffmpeg_signature`.
+
+    Returns:
+        The cached :class:`_EncoderProfile`, or ``None`` when unavailable.
+    """
+    path = config.ffmpeg_encoder_cache_file()
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    key = data.get(signature) if isinstance(data, dict) else None
+    profile = _ALL_PROFILES.get(key) if isinstance(key, str) else None
+    if profile is not None:
+        logger.debug(f"{_LOG_TAG} restored persisted encoder profile {key!r}")
+    return profile
+
+
+def _store_cached_profile(signature: str, profile: _EncoderProfile) -> None:
+    """Persist ``profile`` for ``signature`` to the on-disk encoder cache.
+
+    Best-effort: existing entries are preserved and any I/O error is logged and
+    swallowed (the selection still works in-process this run).
+
+    Args:
+        signature: The ffmpeg identity from :func:`_ffmpeg_signature`.
+        profile: The selected profile to persist.
+    """
+    path = config.ffmpeg_encoder_cache_file()
+    data: dict[str, str] = {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            loaded = json.load(fh)
+        if isinstance(loaded, dict):
+            data = {k: v for k, v in loaded.items() if isinstance(k, str) and isinstance(v, str)}
+    except (OSError, ValueError):
+        data = {}
+    data[signature] = profile.key
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+    except OSError as exc:
+        logger.debug(f"{_LOG_TAG} could not persist encoder cache to {path}: {exc}")
+
+
+def _select_encoder_profile(ffmpeg_binary: str) -> _EncoderProfile:
+    """Auto-select the cheapest usable encoder profile for a recording.
+
+    A prior selection persisted for this exact ffmpeg binary (see
+    :func:`_load_cached_profile`) is reused verbatim, skipping all probing so
+    the common ``start()`` path launches immediately. Otherwise hardware
+    encoders are tried in :data:`_HW_ENCODER_PROFILES` order and the first whose
+    full ddagrab->encoder chain actually runs (see :func:`_profile_usable`) is
+    chosen; the CPU ``libx264`` profile is used when no hardware encoder is
+    usable on this host. The result is then persisted for future processes.
+
+    Args:
+        ffmpeg_binary: The ffmpeg CLI path/name used to probe available encoders.
+
+    Returns:
+        The chosen :class:`_EncoderProfile`.
+    """
+    signature = _ffmpeg_signature(ffmpeg_binary)
+    cached = _load_cached_profile(signature)
+    if cached is not None:
+        return cached
+
+    available = _available_encoders(ffmpeg_binary)
+    selected: _EncoderProfile | None = None
+    for profile in _HW_ENCODER_PROFILES:
+        if profile.encoder in available and _profile_usable(ffmpeg_binary, profile):
+            selected = profile
+            break
+    if selected is None:
+        logger.info(
+            f"{_LOG_TAG} no usable hardware encoder; using CPU encode "
+            f"({_CPU_ENCODER_PROFILE.encoder})"
+        )
+        selected = _CPU_ENCODER_PROFILE
+
+    _store_cached_profile(signature, selected)
+    return selected
 
 
 def _parse_timeout_seconds(timeout: float | str | None) -> int | None:
@@ -61,89 +382,6 @@ def _parse_timeout_seconds(timeout: float | str | None) -> int | None:
         raise ValueError(f"timeout must be positive, got {timeout!r}")
     return int(seconds)
 
-
-def _ps_single_quote(value: str) -> str:
-    """Quote a value as a PowerShell single-quoted string literal."""
-    return "'" + value.replace("'", "''") + "'"
-
-
-def _find_window_title(app: str) -> str | None:
-    """Return the main window title of a running process by exe/process name.
-
-    ``gdigrab`` can only target a window by its *title* (``title=<name>``), but
-    the automation framework identifies apps by exe/package name (e.g.
-    ``MyApp.exe``). This resolves the currently-running process' main window
-    title so a bare app name can be turned into a valid gdigrab target.
-
-    Args:
-        app: An exe or process name (``MyApp.exe`` / ``MyApp``).
-
-    Returns:
-        The process' non-empty main window title, or ``None`` when the process
-        is not running, has no visible window, or the lookup fails.
-    """
-    from idevice.device.config import powershell_binary
-
-    process_name = app[:-4] if app.lower().endswith(".exe") else app
-    script = (
-        f"$p = Get-Process -Name {_ps_single_quote(process_name)} "
-        "-ErrorAction SilentlyContinue "
-        "| Where-Object { $_.MainWindowTitle } | Select-Object -First 1; "
-        "if ($p) { [Console]::Out.Write($p.MainWindowTitle) }"
-    )
-    try:
-        result = subprocess.run(
-            [
-                powershell_binary(),
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                script,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        logger.debug(f"{_LOG_TAG} window-title lookup for {app!r} failed: {exc}")
-        return None
-    title = result.stdout.strip()
-    return title or None
-
-
-def _resolve_gdigrab_target(raw_input: str) -> str:
-    """Resolve the configured input into a capture target.
-
-    The active ``ddagrab`` capture path always records the whole primary
-    desktop, so this currently ignores ``raw_input`` and always returns
-    ``desktop``. The (commented-out) per-window resolution logic is retained for
-    the legacy ``gdigrab`` path, which additionally accepted
-    ``title=<window title>`` / ``hwnd=<hwnd>`` targets.
-
-    Args:
-        raw_input: The configured input (an app/exe name or a raw gdigrab
-            target); ignored while ddagrab full-desktop capture is in effect.
-
-    Returns:
-        The ``gdigrab``/``ddagrab`` capture target, currently always
-        ``desktop``.
-    """
-    # value = (raw_input or "").strip()
-    # if not value or value.lower() == "desktop":
-    #     return "desktop"
-    # if value.lower().startswith(("title=", "hwnd=")):
-    #     return value
-
-    # title = _find_window_title(value)
-    # if title:
-    #     logger.info(f"{_LOG_TAG} resolved input {value!r} -> window title {title!r}")
-    #     return f"title={title}"
-    # logger.warning(
-    #     f"{_LOG_TAG} no visible window found for {value!r}; capturing full desktop instead"
-    # )
-    return "desktop"
-
-
 class WindowsRecord(RecordBase):
     """Drive ffmpeg screen recording of the local Windows desktop."""
 
@@ -157,7 +395,6 @@ class WindowsRecord(RecordBase):
         output_dir: Path | None = None,
         ffmpeg_binary: str | None = None,
         framerate: int | None = None,
-        extra_args: list[str] | None = None,
         input: str | None = None,
     ) -> None:
         """Bind the recorder to the local desktop and locate the ffmpeg CLI.
@@ -174,8 +411,6 @@ class WindowsRecord(RecordBase):
                 :func:`idevice.record.config.ffmpeg_binary`.
             framerate: Desktop capture frame rate; defaults to
                 :func:`idevice.record.config.ffmpeg_framerate`.
-            extra_args: Extra ffmpeg CLI args inserted before the output file;
-                defaults to :func:`idevice.record.config.ffmpeg_extra_args`.
             input: Configured capture input (app/exe name or raw target);
                 defaults to :func:`idevice.record.config.ffmpeg_input`. Ignored
                 while ddagrab full-desktop capture is in effect (see
@@ -196,7 +431,6 @@ class WindowsRecord(RecordBase):
         self._output_dir = Path(output_dir) if output_dir else config.record_output_dir()
         self._ffmpeg_binary = ffmpeg_binary or config.ffmpeg_binary()
         self._framerate = int(framerate) if framerate is not None else config.ffmpeg_framerate()
-        self._extra_args = list(extra_args) if extra_args is not None else config.ffmpeg_extra_args()
         self._input = input or config.ffmpeg_input()
 
         resolved = shutil.which(self._ffmpeg_binary)
@@ -209,11 +443,6 @@ class WindowsRecord(RecordBase):
 
         self._process: subprocess.Popen[bytes] | None = None
         self._output_path: Path | None = None
-        # ffmpeg's stdout/stderr are redirected to a sibling log file so
-        # warnings/errors survive after the process exits; the handle is kept
-        # open for the lifetime of the recording and closed in stop().
-        self._log_path: Path | None = None
-        self._log_file: IO[bytes] | None = None
         self._started_at: float | None = None
         self._stopped_at: float | None = None
         # The auto-stop timeout is enforced in-process (see start()) rather than
@@ -280,65 +509,34 @@ class WindowsRecord(RecordBase):
 
         seconds = _parse_timeout_seconds(timeout)
 
-        # `-loglevel warning` keeps ffmpeg quiet but still surfaces problems;
-        # `-y` overwrites any stale file. `extra_args` are inserted before the
-        # output so callers can override the defaults.
-        # ddagrab produces frames in GPU memory (d3d11 pixel format); libx265
-        # needs a CPU-side format, so `hwdownload` copies frames to system
-        # memory and `format=bgra` declares ddagrab's default 8-bit layout.
-        # Without this ffmpeg cannot convert d3d11 -> yuv420p and aborts.
-        command = [
-            self._ffmpeg_binary,
-            "-y",
-            "-f", "lavfi",
-            "-i",
-            f"ddagrab=output_idx=0:framerate={self._framerate},hwdownload,format=bgra",
-        ]
-        command.extend(self._extra_args)
-        # The `pad` filter (below, disabled) rounded odd width/height up to the
-        # next even value that yuv420p requires; it was only needed for the
-        # legacy per-window gdigrab path. ddagrab captures the full desktop at
-        # the monitor resolution (already even), so it is no longer applied.
-        # if not any(a in ("-vf", "-filter:v", "-filter_complex") for a in self._extra_args):
-        #     command += ["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"]
-        # Encode to H.265/HEVC (yuv420p, CRF 22) for a good quality/size
-        # balance; the `ultrafast` preset minimizes CPU cost during live
-        # capture at the expense of some compression efficiency.
-        if "-c:v" not in self._extra_args and "-vcodec" not in self._extra_args:
-            command += [
-                "-c:v", "libx265",
-                "-preset", "ultrafast",
-                "-crf", "22",
-                "-pix_fmt", "yuv420p",
-            ]
+        # `-y` overwrites any stale file. Auto-select the cheapest encoder: a GPU
+        # encoder keeps ddagrab's D3D11 frames in VRAM (near-zero CPU), otherwise
+        # the CPU profile downloads/converts frames and encodes with libx264.
+        ddagrab_source = f"ddagrab=output_idx=0:framerate={self._framerate}"
+        profile = _select_encoder_profile(self._ffmpeg_binary)
+        logger.info(
+            f"{_LOG_TAG} selected encoder profile {profile.key!r} "
+            f"({profile.encoder}, hardware={profile.hardware})"
+        )
+        command = [self._ffmpeg_binary, "-y"]
+        command.extend(profile.init_args)
+        command += ["-f", "lavfi", "-i", f"{ddagrab_source}{profile.input_filters}"]
+        command.extend(profile.codec_args)
         command.append(str(output_path))
-
-        log_path = output_path.with_suffix(".log")
-        self._log_path = log_path
 
         logger.info(f"{_LOG_TAG} starting recording: {' '.join(command)}")
         try:
-            log_file = open(log_path, "wb")
-        except OSError as exc:
-            raise RecordServerError(
-                f"{_LOG_TAG} failed to open log file {log_path}: {exc}"
-            ) from exc
-        try:
             # stdin is a pipe so stop() can send `q` to ffmpeg for a clean
             # shutdown that writes the MP4 footer (the `moov` atom). stdout and
-            # stderr are redirected to a sibling `.log` file so ffmpeg's
-            # warnings/errors are retained for diagnostics.
+            # stderr are discarded.
             self._process = subprocess.Popen(
                 command,
                 stdin=subprocess.PIPE,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
         except OSError as exc:
-            log_file.close()
-            self._log_file = None
             raise RecordServerError(f"{_LOG_TAG} failed to launch ffmpeg: {exc}") from exc
-        self._log_file = log_file
 
         self._output_path = output_path
         self._started_at = time.time()
@@ -399,7 +597,6 @@ class WindowsRecord(RecordBase):
                 )
             else:
                 logger.warning(f"{_LOG_TAG} no active recording for {self._device_udid}")
-            self._close_log_file()
             return self.status()
 
         process = self._process
@@ -434,19 +631,8 @@ class WindowsRecord(RecordBase):
                 process.wait()
 
         self._stopped_at = time.time()
-        self._close_log_file()
         logger.info(f"{_LOG_TAG} stopped recording {self._device_udid} -> {self._output_path}")
         return self.status()
-
-    def _close_log_file(self) -> None:
-        """Close the ffmpeg log file handle, if one is open."""
-        if self._log_file is not None:
-            try:
-                self._log_file.close()
-            except OSError as exc:
-                logger.debug(f"{_LOG_TAG} closing log file failed: {exc}")
-            finally:
-                self._log_file = None
 
     def status(self) -> dict:
         """Return the current recording status for the local desktop.

@@ -151,16 +151,18 @@ def ffmpeg_framerate() -> int:
     return int(raw) if raw else DEFAULT_FFMPEG_FRAMERATE
 
 
-def ffmpeg_extra_args() -> list[str]:
-    """Return extra ffmpeg CLI args (``IDEVICE_FFMPEG_EXTRA_ARGS``).
+def ffmpeg_encoder_cache_file() -> Path:
+    """Return the path of the persisted ffmpeg encoder-selection cache.
 
-    Parsed with :func:`shlex.split` so quoting works cross-platform (e.g.
-    ``-vf scale=1280:-1 -b:v 8M``). Returns an empty list when unset. These are
-    inserted before the output file, so they can override the default encoder
-    options.
+    The Windows recorder probes ffmpeg once to pick the cheapest usable encoder;
+    the chosen profile is cached here so subsequent processes skip the probe.
+    Defaults to ``~/.idevice/ffmpeg_encoder_cache.json``; override with
+    ``IDEVICE_FFMPEG_ENCODER_CACHE``.
     """
-    raw = os.environ.get("IDEVICE_FFMPEG_EXTRA_ARGS", "")
-    return shlex.split(raw) if raw.strip() else []
+    raw = os.environ.get("IDEVICE_FFMPEG_ENCODER_CACHE")
+    if raw:
+        return Path(raw)
+    return Path.home() / ".idevice" / "ffmpeg_encoder_cache.json"
 
 
 def ffmpeg_input() -> str:
