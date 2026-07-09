@@ -1,27 +1,13 @@
+﻿# -*- coding: utf-8 -*-
 """Windows ffmpeg-backed :class:`RecordBase` implementation.
 
 Runs on the **Windows host** itself: :class:`WindowsRecord` shells out to the
-``ffmpeg`` CLI to capture a video-only recording of the primary monitor via the
-``ddagrab`` (DXGI Desktop Duplication) source filter directly to a local MP4
-file. Unlike ``gdigrab``, ``ddagrab`` captures the *composited* desktop image,
-so it can record GPU/hardware-accelerated content (games, DirectX/OpenGL apps)
-that ``gdigrab``'s GDI ``BitBlt`` path renders as a black frame.
-
-``ddagrab`` captures a whole monitor (not a specific window), so the recorder
-first brings the target app's window to the foreground (best-effort, driven by
-``GAUTO_PACKAGE_NAME``) before starting ffmpeg. Unlike the iRecord-backed macOS
+``ffmpeg`` CLI to capture a video-only recording of the local desktop via the
+``ddagrab`` filter (the Direct3D11 Desktop Duplication API, sourced through
+``lavfi``) directly to a local MP4 file. Unlike the iRecord-backed macOS
 recorder there is no control server, so ``server_ip`` / ``server_port`` are
 unused; the recorder simply supervises a local ``ffmpeg`` subprocess (this
 mirrors the Android scrcpy recorder).
-
-Requirements/caveats:
-
-* Needs FFmpeg 5.0+ (the ``ddagrab`` filter).
-* Must run in an active, unlocked interactive session; a locked workstation, a
-  disconnected RDP session, or a Session 0 service all yield a black capture
-  regardless of the capture method.
-* Exclusive-fullscreen games can be unstable with Desktop Duplication;
-  borderless-windowed mode is the most reliable.
 """
 
 from __future__ import annotations
@@ -34,6 +20,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import IO
 
 from idevice.record import config
 from idevice.record.base.errors import RecordError, RecordServerError
@@ -45,12 +32,6 @@ _LOG_TAG = "[WindowsRecord]"
 
 _DURATION_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([hms]?)\s*$", re.IGNORECASE)
 _UNIT_SECONDS = {"h": 3600, "m": 60, "s": 1, "": 1}
-
-# ddagrab captures a whole monitor by index; 0 is the primary display.
-_OUTPUT_IDX = 0
-# Seconds to wait after foregrounding the target window so its frame is stable
-# before ffmpeg starts capturing.
-_FOREGROUND_SETTLE_SECONDS = 0.5
 
 
 def _parse_timeout_seconds(timeout: float | str | None) -> int | None:
@@ -86,91 +67,30 @@ def _ps_single_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-# PowerShell that finds a running process' main window by exe/process name and
-# forces it to the foreground. A bare `SetForegroundWindow` from a background
-# process is silently blocked by Windows' foreground lock, so this uses the
-# well-known robust sequence: an ALT keystroke to release the lock,
-# `AttachThreadInput` to share input state with the current foreground thread,
-# `BringWindowToTop` + `SetForegroundWindow`, and a HWND_TOPMOST/NOTOPMOST
-# z-order kick, then verifies via `GetForegroundWindow`. `__NAME__` is replaced
-# with a single-quoted PowerShell string literal (avoids brace escaping).
-_FOREGROUND_PS_TEMPLATE = r"""
-$name = __NAME__
-$p = Get-Process -Name $name -ErrorAction SilentlyContinue |
-    Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
-if (-not $p) { Write-Error 'no window'; exit 1 }
-Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-public static class IDeviceWin {
-    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
-    [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
-    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
-    [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
-    [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+def _find_window_title(app: str) -> str | None:
+    """Return the main window title of a running process by exe/process name.
 
-    public static bool Force(IntPtr hWnd) {
-        if (IsIconic(hWnd)) { ShowWindow(hWnd, 9); } // SW_RESTORE
-        uint pid;
-        uint fgThread = GetWindowThreadProcessId(GetForegroundWindow(), out pid);
-        uint appThread = GetCurrentThreadId();
-        // A stray ALT keystroke releases the SetForegroundWindow foreground lock.
-        keybd_event(0x12, 0, 0, UIntPtr.Zero);
-        keybd_event(0x12, 0, 2, UIntPtr.Zero);
-        bool attached = fgThread != appThread && AttachThreadInput(fgThread, appThread, true);
-        BringWindowToTop(hWnd);
-        ShowWindow(hWnd, 5); // SW_SHOW
-        SetForegroundWindow(hWnd);
-        if (attached) { AttachThreadInput(fgThread, appThread, false); }
-        uint flags = 0x0001 | 0x0002; // SWP_NOMOVE | SWP_NOSIZE
-        SetWindowPos(hWnd, new IntPtr(-1), 0, 0, 0, 0, flags); // HWND_TOPMOST
-        SetWindowPos(hWnd, new IntPtr(-2), 0, 0, 0, 0, flags); // HWND_NOTOPMOST
-        return GetForegroundWindow() == hWnd;
-    }
-}
-'@
-$h = $p.MainWindowHandle
-$ok = [IDeviceWin]::Force($h)
-Start-Sleep -Milliseconds 200
-if (-not $ok -and ([IDeviceWin]::GetForegroundWindow() -ne $h)) {
-    Write-Error 'window did not reach the foreground'; exit 2
-}
-"""
-
-
-def _bring_window_to_foreground(app: str) -> bool:
-    """Best-effort: force a running app's main window to the foreground.
-
-    ``ddagrab`` captures a whole monitor rather than a specific window, so the
-    target app must be visible/foreground on the primary display before capture
-    starts. The automation framework identifies apps by exe/process name (e.g.
-    ``MyApp.exe``), so this resolves the running process and forces its main
-    window to the foreground. A plain ``SetForegroundWindow`` from a background
-    process is silently blocked by Windows' foreground lock, so the robust
-    sequence (ALT keystroke + ``AttachThreadInput`` + ``BringWindowToTop`` +
-    ``SetForegroundWindow`` + a topmost z-order kick) is used and the result is
-    verified with ``GetForegroundWindow``. A minimized window is restored first
-    via ``ShowWindow(SW_RESTORE)`` so it is visible again without otherwise
-    resizing it.
+    ``gdigrab`` can only target a window by its *title* (``title=<name>``), but
+    the automation framework identifies apps by exe/package name (e.g.
+    ``MyApp.exe``). This resolves the currently-running process' main window
+    title so a bare app name can be turned into a valid gdigrab target.
 
     Args:
         app: An exe or process name (``MyApp.exe`` / ``MyApp``).
 
     Returns:
-        ``True`` if the window reached the foreground, ``False`` if the
-        process/window could not be found or activation could not be confirmed.
-        Failures are logged and never raised, so a recording still starts
-        (capturing whatever is on the primary display).
+        The process' non-empty main window title, or ``None`` when the process
+        is not running, has no visible window, or the lookup fails.
     """
     from idevice.device.config import powershell_binary
 
     process_name = app[:-4] if app.lower().endswith(".exe") else app
-    script = _FOREGROUND_PS_TEMPLATE.replace("__NAME__", _ps_single_quote(process_name))
+    script = (
+        f"$p = Get-Process -Name {_ps_single_quote(process_name)} "
+        "-ErrorAction SilentlyContinue "
+        "| Where-Object { $_.MainWindowTitle } | Select-Object -First 1; "
+        "if ($p) { [Console]::Out.Write($p.MainWindowTitle) }"
+    )
     try:
         result = subprocess.run(
             [
@@ -185,20 +105,47 @@ def _bring_window_to_foreground(app: str) -> bool:
             timeout=15,
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        logger.warning(f"{_LOG_TAG} foregrounding {app!r} failed: {exc}")
-        return False
-    if result.returncode != 0:
-        detail = result.stderr.strip() or "process/window not found"
-        logger.warning(
-            f"{_LOG_TAG} could not bring {app!r} to the foreground: {detail}"
-        )
-        return False
-    logger.info(f"{_LOG_TAG} brought {app!r} to the foreground")
-    return True
+        logger.debug(f"{_LOG_TAG} window-title lookup for {app!r} failed: {exc}")
+        return None
+    title = result.stdout.strip()
+    return title or None
+
+
+def _resolve_gdigrab_target(raw_input: str) -> str:
+    """Resolve the configured input into a capture target.
+
+    The active ``ddagrab`` capture path always records the whole primary
+    desktop, so this currently ignores ``raw_input`` and always returns
+    ``desktop``. The (commented-out) per-window resolution logic is retained for
+    the legacy ``gdigrab`` path, which additionally accepted
+    ``title=<window title>`` / ``hwnd=<hwnd>`` targets.
+
+    Args:
+        raw_input: The configured input (an app/exe name or a raw gdigrab
+            target); ignored while ddagrab full-desktop capture is in effect.
+
+    Returns:
+        The ``gdigrab``/``ddagrab`` capture target, currently always
+        ``desktop``.
+    """
+    # value = (raw_input or "").strip()
+    # if not value or value.lower() == "desktop":
+    #     return "desktop"
+    # if value.lower().startswith(("title=", "hwnd=")):
+    #     return value
+
+    # title = _find_window_title(value)
+    # if title:
+    #     logger.info(f"{_LOG_TAG} resolved input {value!r} -> window title {title!r}")
+    #     return f"title={title}"
+    # logger.warning(
+    #     f"{_LOG_TAG} no visible window found for {value!r}; capturing full desktop instead"
+    # )
+    return "desktop"
 
 
 class WindowsRecord(RecordBase):
-    """Drive ffmpeg ``ddagrab`` recording of the local Windows primary monitor."""
+    """Drive ffmpeg screen recording of the local Windows desktop."""
 
     def __init__(
         self,
@@ -225,12 +172,14 @@ class WindowsRecord(RecordBase):
                 :func:`idevice.record.config.record_output_dir`.
             ffmpeg_binary: ffmpeg CLI path; defaults to
                 :func:`idevice.record.config.ffmpeg_binary`.
-            framerate: Monitor capture frame rate; defaults to
+            framerate: Desktop capture frame rate; defaults to
                 :func:`idevice.record.config.ffmpeg_framerate`.
             extra_args: Extra ffmpeg CLI args inserted before the output file;
                 defaults to :func:`idevice.record.config.ffmpeg_extra_args`.
-            input: Foreground-activation target (app/exe name); defaults to
-                :func:`idevice.record.config.ffmpeg_input` (``GAUTO_PACKAGE_NAME``).
+            input: Configured capture input (app/exe name or raw target);
+                defaults to :func:`idevice.record.config.ffmpeg_input`. Ignored
+                while ddagrab full-desktop capture is in effect (see
+                :func:`_resolve_gdigrab_target`).
 
         Raises:
             ValueError: If ``device_udid`` is empty.
@@ -260,6 +209,11 @@ class WindowsRecord(RecordBase):
 
         self._process: subprocess.Popen[bytes] | None = None
         self._output_path: Path | None = None
+        # ffmpeg's stdout/stderr are redirected to a sibling log file so
+        # warnings/errors survive after the process exits; the handle is kept
+        # open for the lifetime of the recording and closed in stop().
+        self._log_path: Path | None = None
+        self._log_file: IO[bytes] | None = None
         self._started_at: float | None = None
         self._stopped_at: float | None = None
         # The auto-stop timeout is enforced in-process (see start()) rather than
@@ -299,12 +253,7 @@ class WindowsRecord(RecordBase):
         return True
 
     def start(self, *, timeout: float | str | None = None) -> dict:
-        """Start an ffmpeg ``ddagrab`` recording of the primary monitor.
-
-        Brings the configured target app (``self._input``, from
-        ``GAUTO_PACKAGE_NAME``) to the foreground first (best-effort) so it is
-        visible on the primary display, then captures the composited monitor via
-        ``ddagrab``.
+        """Start an ffmpeg recording of the local desktop.
 
         Args:
             timeout: Optional auto-stop duration; accepts seconds or a duration
@@ -331,49 +280,65 @@ class WindowsRecord(RecordBase):
 
         seconds = _parse_timeout_seconds(timeout)
 
-        # ddagrab captures a whole monitor, so the app under test must be visible
-        # on the primary display first. A bare app name (e.g. `MyApp.exe`, from
-        # `GAUTO_PACKAGE_NAME`) is brought to the foreground best-effort; an empty
-        # / `desktop` input means "just capture the desktop as-is".
-        target = (self._input or "").strip()
-        if target and target.lower() != "desktop":
-            if _bring_window_to_foreground(target):
-                # Give the window a moment to finish repainting after activation.
-                time.sleep(_FOREGROUND_SETTLE_SECONDS)
-
-        # `ddagrab` (DXGI Desktop Duplication) captures the composited primary
-        # monitor, including GPU/hardware-accelerated content that `gdigrab`
-        # cannot. Its frames live on the GPU, so `hwdownload,format=bgra` copies
-        # them back to system memory before the CPU `libx264` encoder. `-y`
-        # overwrites any stale file; a yuv420p H.264 stream keeps the output
-        # broadly playable. `extra_args` are inserted before the output so callers
-        # can override the default filter/encoder (e.g. `-c:v h264_nvenc`).
-        ddagrab_src = f"ddagrab=output_idx={_OUTPUT_IDX}:framerate={self._framerate}"
+        # `-loglevel warning` keeps ffmpeg quiet but still surfaces problems;
+        # `-y` overwrites any stale file. `extra_args` are inserted before the
+        # output so callers can override the defaults.
+        # ddagrab produces frames in GPU memory (d3d11 pixel format); libx265
+        # needs a CPU-side format, so `hwdownload` copies frames to system
+        # memory and `format=bgra` declares ddagrab's default 8-bit layout.
+        # Without this ffmpeg cannot convert d3d11 -> yuv420p and aborts.
         command = [
             self._ffmpeg_binary,
             "-y",
             "-f", "lavfi",
-            "-i", ddagrab_src,
+            "-i",
+            f"ddagrab=output_idx=0:framerate={self._framerate},hwdownload,format=bgra",
         ]
         command.extend(self._extra_args)
-        if not any(a in ("-vf", "-filter:v", "-filter_complex") for a in self._extra_args):
-            command += ["-vf", "hwdownload,format=bgra"]
+        # The `pad` filter (below, disabled) rounded odd width/height up to the
+        # next even value that yuv420p requires; it was only needed for the
+        # legacy per-window gdigrab path. ddagrab captures the full desktop at
+        # the monitor resolution (already even), so it is no longer applied.
+        # if not any(a in ("-vf", "-filter:v", "-filter_complex") for a in self._extra_args):
+        #     command += ["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"]
+        # Encode to H.265/HEVC (yuv420p, CRF 22) for a good quality/size
+        # balance; the `ultrafast` preset minimizes CPU cost during live
+        # capture at the expense of some compression efficiency.
         if "-c:v" not in self._extra_args and "-vcodec" not in self._extra_args:
-            command += ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p"]
+            command += [
+                "-c:v", "libx265",
+                "-preset", "ultrafast",
+                "-crf", "22",
+                "-pix_fmt", "yuv420p",
+            ]
         command.append(str(output_path))
+
+        log_path = output_path.with_suffix(".log")
+        self._log_path = log_path
 
         logger.info(f"{_LOG_TAG} starting recording: {' '.join(command)}")
         try:
+            log_file = open(log_path, "wb")
+        except OSError as exc:
+            raise RecordServerError(
+                f"{_LOG_TAG} failed to open log file {log_path}: {exc}"
+            ) from exc
+        try:
             # stdin is a pipe so stop() can send `q` to ffmpeg for a clean
-            # shutdown that writes the MP4 footer (the `moov` atom).
+            # shutdown that writes the MP4 footer (the `moov` atom). stdout and
+            # stderr are redirected to a sibling `.log` file so ffmpeg's
+            # warnings/errors are retained for diagnostics.
             self._process = subprocess.Popen(
                 command,
                 stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
             )
         except OSError as exc:
+            log_file.close()
+            self._log_file = None
             raise RecordServerError(f"{_LOG_TAG} failed to launch ffmpeg: {exc}") from exc
+        self._log_file = log_file
 
         self._output_path = output_path
         self._started_at = time.time()
@@ -434,6 +399,7 @@ class WindowsRecord(RecordBase):
                 )
             else:
                 logger.warning(f"{_LOG_TAG} no active recording for {self._device_udid}")
+            self._close_log_file()
             return self.status()
 
         process = self._process
@@ -468,8 +434,19 @@ class WindowsRecord(RecordBase):
                 process.wait()
 
         self._stopped_at = time.time()
+        self._close_log_file()
         logger.info(f"{_LOG_TAG} stopped recording {self._device_udid} -> {self._output_path}")
         return self.status()
+
+    def _close_log_file(self) -> None:
+        """Close the ffmpeg log file handle, if one is open."""
+        if self._log_file is not None:
+            try:
+                self._log_file.close()
+            except OSError as exc:
+                logger.debug(f"{_LOG_TAG} closing log file failed: {exc}")
+            finally:
+                self._log_file = None
 
     def status(self) -> dict:
         """Return the current recording status for the local desktop.
