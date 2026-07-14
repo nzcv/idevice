@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from idevice.device.android.device import AndroidDevice
 from idevice.device.dummy.device import DummyDevice
 from idevice.device.ios.device import IOSDevice
