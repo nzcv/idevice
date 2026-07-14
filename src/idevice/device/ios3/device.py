@@ -415,7 +415,19 @@ class IOSDevice3(DeviceBase):
                 return len(undeleted) == 0
 
         return asyncio.run(main())
-    
+
+    def screenshot(self, local: Path | str) -> bool:
+        """Capture the screen via ``pymobiledevice3 developer dvt screenshot``.
+
+        Requires developer setup (mounted DDI and, on iOS 17+, an active tunnel).
+        """
+        local_path = Path(local)
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        logger.info(f"{_LOG_TAG} Capturing screenshot on {self.device_id} to {local_path}")
+        cmd = self._command("developer", "dvt", "screenshot", str(local_path))
+        result = self._runner.run(cmd, check=False)
+        return result.returncode == 0 and local_path.exists()
+
     @classmethod
     def default_udid(cls) -> str:
         """Return the UDID of the first USB-connected iOS device."""

@@ -356,6 +356,28 @@ class AndroidDevice(DeviceBase):
         result = self._runner.run(command, check=False)
         return result.returncode == 0
 
+    def screenshot(self, local: Path | str) -> bool:
+        """Capture the screen via ``adb shell screencap`` and pull it to ``local``.
+
+        SubprocessRunner decodes stdout as text, so the PNG is written to a
+        device temp file and pulled instead of streamed over stdout.
+        """
+        local_path = Path(local)
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        remote = "/sdcard/idevice_screenshot.png"
+        logger.info(f"[AndroidDevice] Capturing screenshot on {self.device_id} to {local_path}")
+        capture = self._base_command()
+        capture.extend(["shell", "screencap", "-p", remote])
+        if self._runner.run(capture, check=False).returncode != 0:
+            return False
+        pull = self._base_command()
+        pull.extend(["pull", remote, str(local_path)])
+        pulled = self._runner.run(pull, check=False).returncode == 0
+        cleanup = self._base_command()
+        cleanup.extend(["shell", "rm", "-f", remote])
+        self._runner.run(cleanup, check=False)
+        return pulled and local_path.exists()
+
     def _install_with_uiautomator2(self, cmd: list[str], *, device_id: str | None) -> InstallResult:
         """Use uiautomator2 WatchContext (builtin + extra) while adb install runs."""
         import uiautomator2 as u2

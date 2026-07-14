@@ -329,3 +329,15 @@ class IOSDevice(DeviceBase):
         raise NotImplementedError(
             f"{_LOG_TAG} documents_rm is not supported on go-ios"
         )
+
+    def screenshot(self, local: Path | str) -> bool:
+        """Capture the screen via go-ios ``screenshot --output``.
+
+        Requires Developer Mode enabled and the Developer Disk Image mounted.
+        """
+        local_path = Path(local)
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        logger.info(f"{_LOG_TAG} Capturing screenshot on {self.device_id} to {local_path}")
+        cmd = [self._binary, "--udid", self.device_id, "screenshot", f"--output={local_path}"]
+        result = self._runner.run(cmd, check=False)
+        return result.returncode == 0 and local_path.exists()

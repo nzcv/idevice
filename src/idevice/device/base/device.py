@@ -323,6 +323,23 @@ class DeviceBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def screenshot(self, local: Path | str) -> bool:
+        """Capture the device screen and write it to ``local``.
+
+        Args:
+            local: Destination file path on the host (e.g. ``screenshot.png``).
+                Parent directories are created as needed.
+
+        Returns:
+            bool: ``True`` if the screenshot was captured and written,
+                ``False`` otherwise.
+
+        Raises:
+            NotImplementedError: On platforms without screen capture support.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def documents_rm(self, app_id: str, remote: str) -> bool:
         """Remove a file or directory from an app's Documents sandbox.
 

@@ -160,3 +160,8 @@ class DummyDevice(DeviceBase):
         del app_id, remote
         self._noop("documents_rm")
         return False
+
+    def screenshot(self, local: Path | str) -> bool:
+        del local
+        self._noop("screenshot")
+        return False
