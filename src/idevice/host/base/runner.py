@@ -174,7 +174,3 @@ class Runner:
         if bundle_id:
             params["bundleId"] = bundle_id
         return self._json(self._get("/api/tap", params=params))
-
-    def exit(self) -> dict:
-        """Quit the runner (``/api/exit``)."""
-        return self._json(self._get("/api/exit"))

@@ -182,5 +182,16 @@ class WindowsHost(HostBase):
         return {"status": "ok", "action": "capture_memgraph", "path": ""}
 
     def exit(self) -> dict:
-        """Quit the on-device runner."""
-        return self.runner().exit()
+        """Gracefully quit the on-device runner via the keeper.
+
+        Uses the keeper's dedicated graceful-exit endpoint
+        (``POST /api/runs/{udid}/exit``) instead of proxying ``/api/exit``
+        directly. The keeper asks the runner to quit and then waits for the run
+        to reach a terminal state (finalizing the ``.xcresult``), only awaiting
+        the exit request's response headers rather than its body. This avoids
+        the spurious ``502`` the proxy path returns when the runner tears down
+        its HTTP server (and the XCUITest process) before the ``/api/exit``
+        response is fully written back.
+        """
+        logger.info(f"{_LOG_TAG} exiting run for {self.device_udid}")
+        return self.keeper.exit(self.device_udid, device_host=self.device_ip)

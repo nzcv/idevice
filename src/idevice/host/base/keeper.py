@@ -169,6 +169,60 @@ class Keeper:
         result = self._request("DELETE", f"/api/runs/{device_udid}")
         return result if isinstance(result, dict) else {}
 
+    def exit(
+        self,
+        device_udid: str,
+        *,
+        device_host: str | None = None,
+        shutdown_timeout_secs: int | None = None,
+        timeout: float | None = None,
+    ) -> dict:
+        """Gracefully quit the on-device runner (``POST /api/runs/{udid}/exit``).
+
+        The keeper asks the runner to quit (``GET /api/exit``) and then waits
+        for the run to reach a terminal state, so ``xcodebuild`` finalizes the
+        ``.xcresult``. Unlike proxying ``/api/exit`` directly, the keeper only
+        awaits the exit request's response headers and then polls the run
+        status, so it is not affected by the runner tearing down its HTTP
+        server (and the XCUITest process) while the response is still being
+        written. This request blocks until the runner exits or the keeper's
+        shutdown timeout elapses.
+
+        Args:
+            device_udid: Target device UDID / run key.
+            device_host: Reachable device host; overrides the one stored at
+                launch. ``None`` uses the stored host.
+            shutdown_timeout_secs: How long the keeper waits for the runner to
+                quit and the ``.xcresult`` to finalize; ``None`` uses the
+                keeper's default (120s).
+            timeout: Per-request HTTP timeout; must exceed
+                ``shutdown_timeout_secs`` since the keeper holds the request
+                open until the runner exits. ``None`` derives a value that
+                comfortably covers the keeper's shutdown budget.
+
+        Returns:
+            dict: The final run record.
+        """
+        if not device_udid:
+            raise ValueError("device_udid is required and must be a non-empty string")
+        body: dict = {}
+        if device_host is not None:
+            body["device_host"] = device_host
+        if shutdown_timeout_secs is not None:
+            body["shutdown_timeout_secs"] = int(shutdown_timeout_secs)
+        if timeout is None:
+            # Keep the HTTP request open longer than the keeper's shutdown
+            # budget (default 120s), which it blocks on while the runner quits.
+            budget = shutdown_timeout_secs if shutdown_timeout_secs is not None else 120
+            timeout = budget + self._timeout
+        result = self._request(
+            "POST",
+            f"/api/runs/{device_udid}/exit",
+            json_body=body,
+            timeout=timeout,
+        )
+        return result if isinstance(result, dict) else {}
+
     def export(self, device_udid: str) -> dict:
         """Export memgraphs (``POST /api/runs/{udid}/export``).
 

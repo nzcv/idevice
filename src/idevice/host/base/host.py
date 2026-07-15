@@ -216,5 +216,11 @@ class HostBase(ABC):
 
     @abstractmethod
     def exit(self) -> dict:
-        """Quit the on-device runner."""
+        """Gracefully quit the on-device runner and wait for it to finish.
+
+        Concrete keeper-backed hosts drive this through the keeper's dedicated
+        graceful-exit endpoint (``POST /api/runs/{udid}/exit``), which asks the
+        runner to quit and waits for the run to reach a terminal state so the
+        ``.xcresult`` is finalized.
+        """
         raise NotImplementedError
