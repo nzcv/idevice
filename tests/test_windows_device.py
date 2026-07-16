@@ -97,10 +97,24 @@ def test_uninstall_removes_only_this_app_dir(windows_device) -> None:
     assert Path(PKG_NAME).stem in script
 
 
-def test_stop_app_rejects_empty_app_id(windows_device) -> None:
-    device, _runner, _app_dir = windows_device
-    with pytest.raises(ValueError, match="app_id is required"):
-        device.stop_app("")
+def test_stop_app_kills_process_by_stem(windows_device) -> None:
+    device, runner, _app_dir = windows_device
+    device.stop_app("App.exe")
+    runner.run.assert_called_once()
+    script = runner.run.call_args.args[0][-1]
+    assert "Stop-Process" in script
+    assert "-Name 'App'" in script
+    assert "-Force" in script
+    assert "SilentlyContinue" in script
+
+
+def test_stop_app_defaults_to_bound_package_name(windows_device) -> None:
+    device, runner, _app_dir = windows_device
+    device.stop_app()
+    runner.run.assert_called_once()
+    script = runner.run.call_args.args[0][-1]
+    assert "Stop-Process" in script
+    assert "-Name 'App'" in script
 
 
 def test_quote_escapes_single_quotes() -> None:

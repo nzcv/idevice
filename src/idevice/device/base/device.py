@@ -14,7 +14,14 @@ class DeviceBase(ABC):
     A device instance is always bound to a single ``device_id`` (UDID / serial).
     """
 
-    def __init__(self, device_id: str, device_ip: str, platform: str):
+    def __init__(
+        self,
+        device_id: str,
+        device_ip: str,
+        platform: str,
+        *,
+        package_name: str = "",
+    ):
         """Bind the instance to a single device.
 
         Args:
@@ -22,6 +29,8 @@ class DeviceBase(ABC):
             device_ip: Device IP address, or an empty string when not applicable.
             platform: Platform identifier (e.g. ``ios``, ``ios3``, ``android``,
                 ``windows``).
+            package_name: Default app id (bundle id / package name / exe name)
+                used when callers omit ``app_id`` (e.g. :meth:`stop_app`).
 
         Raises:
             ValueError: If ``device_id`` is empty or not a string.
@@ -31,7 +40,8 @@ class DeviceBase(ABC):
         self._device_id = device_id
         self._device_ip = device_ip
         self._platform = platform
-    
+        self._package_name = package_name
+
     @property
     def platform(self) -> str:
         """Platform bound to this instance."""
@@ -46,6 +56,22 @@ class DeviceBase(ABC):
     def device_ip(self) -> str:
         """Device ip bound to this instance."""
         return self._device_ip
+
+    @property
+    def package_name(self) -> str:
+        """Default app id bound to this instance (may be empty)."""
+        return self._package_name
+
+    def _resolve_app_id(self, app_id: str | None) -> str:
+        """Return ``app_id`` or fall back to the bound ``package_name``.
+
+        Raises:
+            ValueError: If both ``app_id`` and ``package_name`` are empty.
+        """
+        target = app_id or self._package_name
+        if not target:
+            raise ValueError("app_id is required and must be a non-empty string")
+        return target
 
     @classmethod
     @abstractmethod
@@ -107,14 +133,15 @@ class DeviceBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def stop_app(self, app_id: str) -> None:
+    def stop_app(self, app_id: str | None = None) -> None:
         """Stop (kill) a running app on the bound device.
 
         Args:
-            app_id: ID of the app to stop (bundle id / package name).
+            app_id: ID of the app to stop (bundle id / package name). When
+                omitted or empty, uses the bound :attr:`package_name`.
 
         Raises:
-            ValueError: If ``app_id`` is empty.
+            ValueError: If ``app_id`` is empty and no ``package_name`` is bound.
         """
         raise NotImplementedError
 

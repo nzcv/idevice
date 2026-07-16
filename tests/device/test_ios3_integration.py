@@ -76,9 +76,15 @@ def test_launch_not_installed_raises_app_not_installed(
         ios3_device.launch_app("com.idevice.integration.nonexistent")
 
 
-def test_stop_app_rejects_empty_bundle_id(ios3_device: IOSDevice3) -> None:
+def test_stop_app_rejects_empty_when_no_bound_package(
+    ios3_device: IOSDevice3,
+) -> None:
+    """Empty/omitted app_id raises when the device has no bound package_name."""
+    assert ios3_device.package_name == ""
     with pytest.raises(ValueError, match="app_id"):
         ios3_device.stop_app("")
+    with pytest.raises(ValueError, match="app_id"):
+        ios3_device.stop_app()
 
 
 def test_host_is_running_returns_bool(ios3_device: IOSDevice3) -> None:

@@ -28,14 +28,15 @@ class WindowsDevice(DeviceBase):
         package_name: str,
         cache_dir: Path | None = None,
     ) -> None:
-        super().__init__(device_id, device_ip, platform="windows")
-        self._runner = SubprocessRunner()
-        self._package_name = package_name
-        self._company_name = company_name
-        if not self._company_name:
+        if not company_name:
             raise ValueError("company_name is required and must be a non-empty string")
-        if not self._package_name:
+        if not package_name:
             raise ValueError("package_name is required and must be a non-empty string")
+        super().__init__(
+            device_id, device_ip, platform="windows", package_name=package_name
+        )
+        self._runner = SubprocessRunner()
+        self._company_name = company_name
         self._app_cache = InstalledAppCache(device_id, cache_dir=cache_dir)
         _app_dir = os.environ.get("IDEVICE_APP_DIR", "D:\\IDeviceExtractedApps")
         self._app_dir = Path(_app_dir)
@@ -131,10 +132,15 @@ class WindowsDevice(DeviceBase):
         )
         self._run_powershell(script)
 
-    def stop_app(self, app_id: str) -> None:
-        if not app_id:
-            raise ValueError("app_id is required and must be a non-empty string")
-        logger.info(f"Stopping app on Windows device {self.device_id}: {app_id}")
+    def stop_app(self, app_id: str | None = None) -> None:
+        target = self._resolve_app_id(app_id)
+        process_name = Path(target).stem
+        logger.info(f"Stopping app on Windows device {self.device_id}: {target}")
+        script = (
+            f"Stop-Process -Name {self._quote(process_name)} "
+            f"-Force -ErrorAction SilentlyContinue"
+        )
+        self._run_powershell(script)
 
     def get_installed_pkg_name(self, app_id: str) -> InstalledAppInfo | None:
         if not self.is_installed(app_id):

@@ -91,7 +91,10 @@ class Device(metaclass=_DeviceMeta):
             device_id: Device id (UDID / serial). Required and non-empty.
             device_ip: Device IP address, or an empty string when not applicable.
             company_name: Windows-only publisher folder under ``%LocalAppData%``.
-            package_name: Windows-only package id used to resolve the documents root.
+            package_name: Default app id (bundle id / package name / exe name)
+                bound on the device. Used by :meth:`DeviceBase.stop_app` when
+                ``app_id`` is omitted. On Windows also used to resolve the
+                documents sandbox root.
 
         Returns:
             DeviceBase: The platform-specific device implementation.
@@ -101,12 +104,18 @@ class Device(metaclass=_DeviceMeta):
         """
         p = Platform.from_string(platform)
         logger.debug(f"Creating device for platform={p} device_id={device_id}")
-        if p  is Platform.IOS:
-            device: DeviceBase = IOSDevice(device_id, device_ip=device_ip)
+        if p is Platform.IOS:
+            device: DeviceBase = IOSDevice(
+                device_id, device_ip=device_ip, package_name=package_name
+            )
         elif p is Platform.IOS3:
-            device = IOSDevice3(device_id, device_ip=device_ip)
+            device = IOSDevice3(
+                device_id, device_ip=device_ip, package_name=package_name
+            )
         elif p is Platform.ANDROID:
-            device = AndroidDevice(device_id, device_ip=device_ip)
+            device = AndroidDevice(
+                device_id, device_ip=device_ip, package_name=package_name
+            )
         elif p is Platform.WINDOWS:
             device = WindowsDevice(
                 device_id,
@@ -125,7 +134,7 @@ class Device(metaclass=_DeviceMeta):
         """Build a device from the ``GAUTO_*`` environment variables.
 
         Reads ``GAUTO_PLATFORM``, ``GAUTO_DEVICE_UDID``, ``GAUTO_DEVICE_IP``,
-        and on Windows also ``GAUTO_COMPANY_NAME`` / ``GAUTO_PACKAGE_NAME``.
+        ``GAUTO_PACKAGE_NAME``, and on Windows also ``GAUTO_COMPANY_NAME``.
 
         Unlike :meth:`create`, this never raises on a missing/blank environment:
         when required ``GAUTO_*`` variables are empty (or the platform is
@@ -147,14 +156,10 @@ class Device(metaclass=_DeviceMeta):
         required_env: list[tuple[str, str]] = [
             ("GAUTO_PLATFORM", platform),
             ("GAUTO_DEVICE_UDID", device_id),
+            ("GAUTO_PACKAGE_NAME", package_name),
         ]
         if platform.lower() in {Platform.WINDOWS.value, "windows"}:
-            required_env.extend(
-                [
-                    ("GAUTO_COMPANY_NAME", company_name),
-                    ("GAUTO_PACKAGE_NAME", package_name),
-                ]
-            )
+            required_env.append(("GAUTO_COMPANY_NAME", company_name))
         missing = [name for name, value in required_env if not value]
         if missing:
             reason = f"missing/blank env var(s): {', '.join(missing)}"

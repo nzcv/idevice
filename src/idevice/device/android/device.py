@@ -41,9 +41,12 @@ class AndroidDevice(DeviceBase):
         device_id: str,
         *,
         device_ip: str = "",
+        package_name: str = "",
         cache_dir: Path | None = None,
     ) -> None:
-        super().__init__(device_id, device_ip, platform="android")
+        super().__init__(
+            device_id, device_ip, platform="android", package_name=package_name
+        )
         self._binary = self.DEFAULT_BINARY
         self._runner = SubprocessRunner()
         self._app_cache = InstalledAppCache(device_id, cache_dir=cache_dir)
@@ -150,12 +153,11 @@ class AndroidDevice(DeviceBase):
         )
         self._runner.run(command)
 
-    def stop_app(self, app_id: str) -> None:
-        if not app_id:
-            raise ValueError("app_id is required and must be a non-empty string")
-        logger.info(f"Stopping app on Android device {self.device_id}: {app_id}")
+    def stop_app(self, app_id: str | None = None) -> None:
+        target = self._resolve_app_id(app_id)
+        logger.info(f"Stopping app on Android device {self.device_id}: {target}")
         command = self._base_command()
-        command.extend(["shell", "am", "force-stop", app_id])
+        command.extend(["shell", "am", "force-stop", target])
         self._runner.run(command)
 
     def get_installed_pkg_name(self, app_id: str) -> InstalledAppInfo | None:

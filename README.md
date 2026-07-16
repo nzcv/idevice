@@ -14,7 +14,7 @@ The package ships two complementary APIs:
 | iOS | [go-ios](https://github.com/danielpaulus/go-ios) (`IOSDevice`) | Yes | Yes | — | — | Planned (WDA) |
 | iOS | [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) (`IOSDevice3`) | Yes | Yes (AFC + app sandbox) | Yes | — | Planned (WDA) |
 | Android | adb (`AndroidDevice`) | Yes | Yes | — | Yes | Yes (`AndroidUIAuto`) |
-| Windows | PowerShell (`WindowsDevice`) | Partial | — | Yes (local filesystem) | — | Planned |
+| Windows | PowerShell (`WindowsDevice`) | Yes | — | Yes (local filesystem) | — | Planned |
 
 macOS and HarmonyOS are not implemented yet.
 
@@ -51,13 +51,19 @@ device = Device.create(Platform.IOS, device_id="00000000-0000000000000000", devi
 # iOS via pymobiledevice3 (iOS 17+ tunnel support)
 device = Device.create(Platform.IOS3, device_id="00000000-0000000000000000", device_ip="")
 
-# Android via adb
-device = Device.create(Platform.ANDROID, device_id="emulator-5554", device_ip="")
+# Android via adb (package_name is the default app id for stop_app())
+device = Device.create(
+    Platform.ANDROID,
+    device_id="emulator-5554",
+    device_ip="",
+    package_name="com.example.app",
+)
 
 device.install(Path("MyApp.ipa"), app_id="com.example.app")
 device.launch_app("com.example.app")
 device.is_installed("com.example.app")
-device.stop_app("com.example.app")
+device.stop_app()  # uses bound package_name
+device.stop_app("com.example.app")  # explicit override
 device.uninstall("com.example.app")
 ```
 
@@ -131,14 +137,15 @@ Every platform implementation shares the same interface:
 
 - `install(package_path, app_id=None)` — install `.ipa` / `.apk` and optionally record bundle id → file name
 - `uninstall(app_id)` / `is_installed(app_id)` / `get_installed_pkg_name(app_id)` — the latter returns an `InstalledAppInfo(app_id, version, path)` or `None`
-- `launch_app(app_id)` / `stop_app(app_id)`
+- `launch_app(app_id)` / `stop_app(app_id=None)` — `stop_app()` uses the bound `package_name` when `app_id` is omitted
+- `package_name` — default app id set at `Device.create` / `Device.from_env` (`GAUTO_PACKAGE_NAME`)
 - `push(local, remote, app_id=None, documents_only=False)` / `pull(remote, local, app_id=None, documents_only=True)` — host ↔ device file transfer
 - `ls(remote, app_id=None, recursive=False)` — list a remote directory on the device
 - `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox, supporting both files and directories (implemented on `IOSDevice3` and `WindowsDevice`; other platforms raise `NotImplementedError`)
 - `swipe(x1, y1, x2, y2, duration_ms=300)` — touch gesture (Android implemented; iOS/Windows raise `NotImplementedError`)
 - `host_is_running()` — whether WebDriverAgent / UIAutomator2 host process is up
 
-Use `Device.create(Platform, device_id=…, device_ip="")` or construct `IOSDevice`, `IOSDevice3`, `AndroidDevice`, or `WindowsDevice` directly.
+Use `Device.create(Platform, device_id=…, device_ip="", package_name=…)` or construct `IOSDevice`, `IOSDevice3`, `AndroidDevice`, or `WindowsDevice` directly. `Device.from_env` requires `GAUTO_PACKAGE_NAME` on all platforms.
 
 ### `UIAutoBase`
 

@@ -50,9 +50,12 @@ class IOSDevice3(DeviceBase):
         device_id: str,
         *,
         device_ip: str,
+        package_name: str = "",
         cache_dir: Path | None = None,
     ) -> None:
-        super().__init__(device_id, device_ip, platform="ios3")
+        super().__init__(
+            device_id, device_ip, platform="ios3", package_name=package_name
+        )
         self._binary = ios3_binary()
         self._runner = SubprocessRunner()
         self._app_cache = InstalledAppCache(device_id, cache_dir=cache_dir)
@@ -142,15 +145,18 @@ class IOSDevice3(DeviceBase):
         cmd = self._command("developer", "dvt", "launch", app_id)
         self._runner.run(cmd)
     
-    def stop_app(self, app_id: str) -> None:
-        if not app_id:
-            raise ValueError("app_id is required and must be a non-empty string")
+    def stop_app(self, app_id: str | None = None) -> None:
+        target = self._resolve_app_id(app_id)
         try:
-            logger.info(f"{_LOG_TAG} Stopping app on iOS device {self.device_id}: {app_id}")
-            cmd = self._command("developer", "dvt", "pkill", "--bundle", app_id)
+            logger.info(
+                f"{_LOG_TAG} Stopping app on iOS device {self.device_id}: {target}"
+            )
+            cmd = self._command("developer", "dvt", "pkill", "--bundle", target)
             self._runner.run(cmd)
         except Exception as e:
-            logger.error(f"{_LOG_TAG} Failed to stop app {app_id} on {self.device_id}: {e}")
+            logger.error(
+                f"{_LOG_TAG} Failed to stop app {target} on {self.device_id}: {e}"
+            )
 
     def get_installed_pkg_name(self, app_id: str) -> InstalledAppInfo | None:
         if not self.is_installed(app_id):

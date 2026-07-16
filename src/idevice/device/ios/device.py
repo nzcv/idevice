@@ -37,9 +37,12 @@ class IOSDevice(DeviceBase):
         device_id: str,
         *,
         device_ip: str = "",
+        package_name: str = "",
         cache_dir: Path | None = None,
     ) -> None:
-        super().__init__(device_id, device_ip, platform="ios")
+        super().__init__(
+            device_id, device_ip, platform="ios", package_name=package_name
+        )
         self._binary = self.DEFAULT_BINARY
         self._runner = SubprocessRunner()
         self._app_cache = InstalledAppCache(device_id, cache_dir=cache_dir)
@@ -131,15 +134,16 @@ class IOSDevice(DeviceBase):
         cmd = [self._binary, "--udid", self.device_id, "launch", app_id]
         self._runner.run(cmd)
 
-    def stop_app(self, app_id: str) -> None:
-        if not app_id:
-            raise ValueError("app_id is required and must be a non-empty string")
-        logger.info(f"{_LOG_TAG} Stopping app on iOS device {self.device_id}: {app_id}")
+    def stop_app(self, app_id: str | None = None) -> None:
+        target = self._resolve_app_id(app_id)
+        logger.info(f"{_LOG_TAG} Stopping app on iOS device {self.device_id}: {target}")
         try:
-            cmd = [self._binary, "--udid", self.device_id, "kill", app_id]
+            cmd = [self._binary, "--udid", self.device_id, "kill", target]
             self._runner.run(cmd)
         except CommandExecutionError as exc:
-            logger.warning(f"{_LOG_TAG} Failed to stop app {app_id} on {self.device_id}: {exc}")
+            logger.warning(
+                f"{_LOG_TAG} Failed to stop app {target} on {self.device_id}: {exc}"
+            )
             return False
         return True
 

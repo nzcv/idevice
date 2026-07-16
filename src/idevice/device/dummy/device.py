@@ -44,6 +44,7 @@ class DummyDevice(DeviceBase):
         self._device_id = device_id
         self._device_ip = device_ip
         self._platform = platform
+        self._package_name = ""
         logger.error(
             f"{_LOG_TAG} no device bound: {reason}; "
             f"all device operations will be no-ops"
@@ -78,7 +79,7 @@ class DummyDevice(DeviceBase):
         del app_id
         self._noop("launch_app")
 
-    def stop_app(self, app_id: str) -> None:
+    def stop_app(self, app_id: str | None = None) -> None:
         del app_id
         self._noop("stop_app")
 
