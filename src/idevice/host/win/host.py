@@ -108,6 +108,7 @@ class WindowsHost(HostBase):
         self,
         *,
         timeout: float = config.DEFAULT_READY_TIMEOUT,
+        memgraph: bool = False,
     ) -> dict:
         """Launch ``bundle_id`` via the keeper's combined launch endpoint.
 
@@ -121,6 +122,8 @@ class WindowsHost(HostBase):
         Args:
             timeout: Overall budget in seconds covering build, runner startup,
                 and the launch itself; passed to the keeper as ``timeout_secs``.
+            memgraph: Accepted for API parity; Windows does not support memgraph
+                capture, so this flag is ignored.
 
         Returns:
             dict: The keeper's combined result, e.g.
@@ -130,6 +133,7 @@ class WindowsHost(HostBase):
             ValueError: If ``bundle_id`` is empty.
             KeeperError: If the keeper cannot launch the run or the app.
         """
+        del memgraph  # Windows does not support memgraph capture.
         if not self.bundle_id:
             raise ValueError("bundle_id is required and must be a non-empty string")
 

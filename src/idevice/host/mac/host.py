@@ -106,6 +106,7 @@ class MacHost(HostBase):
         self,
         *,
         timeout: float = config.DEFAULT_READY_TIMEOUT,
+        memgraph: bool = False,
     ) -> dict:
         """Launch ``bundle_id`` via the keeper's combined launch endpoint.
 
@@ -119,6 +120,9 @@ class MacHost(HostBase):
         Args:
             timeout: Overall budget in seconds covering build, runner startup,
                 and the launch itself; passed to the keeper as ``timeout_secs``.
+            memgraph: When ``True``, ask the keeper to cold-launch with
+                performance diagnostics and ``MallocStackLogging`` so a later
+                diagnostic memory graph carries allocation backtraces.
 
         Returns:
             dict: The keeper's combined result, e.g.
@@ -139,6 +143,7 @@ class MacHost(HostBase):
             # Hold the HTTP request open a bit longer than the keeper's own
             # budget, since it blocks until the launch finishes.
             timeout=timeout + config.http_timeout(),
+            memgraph=memgraph,
         )
         logger.info(f"{_LOG_TAG} launched {self.bundle_id} on {self.device_ip}")
         return result

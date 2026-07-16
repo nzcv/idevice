@@ -83,8 +83,9 @@ class DummyHost(HostBase):
         self,
         *,
         timeout: float = config.DEFAULT_READY_TIMEOUT,
+        memgraph: bool = False,
     ) -> dict:
-        del timeout
+        del timeout, memgraph
         return self._noop("launch_app")
 
     def capture_memgraph(self, timeout: float = 60.0) -> dict:

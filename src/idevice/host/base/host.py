@@ -115,12 +115,16 @@ class HostBase(ABC):
         self,
         *,
         timeout: float = config.DEFAULT_READY_TIMEOUT,
+        memgraph: bool = False,
     ) -> dict:
         """Launch the bound ``bundle_id`` and make sure it comes up running.
 
         Args:
             timeout: Overall budget in seconds covering runner restart,
                 readiness, and the launch itself.
+            memgraph: When ``True``, cold-launch with performance diagnostics
+                and stack logging for later memgraph capture. Platforms that
+                do not support memgraph may ignore this flag.
 
         Returns:
             dict: The runner's launch result.

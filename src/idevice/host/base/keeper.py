@@ -117,6 +117,7 @@ class Keeper:
         bundle_id: str,
         timeout_secs: int | None = None,
         timeout: float | None = None,
+        memgraph: bool = False,
     ) -> dict:
         """Launch a run and the app in one call (``GET /api/runs/{udid}/launch``).
 
@@ -133,6 +134,9 @@ class Keeper:
                 launch; ``None`` uses the keeper's default (300s).
             timeout: Per-request HTTP timeout; must exceed ``timeout_secs`` since
                 the keeper holds the request open until it finishes.
+            memgraph: When ``True``, ask the keeper to cold-launch with
+                performance diagnostics and ``MallocStackLogging`` so a later
+                diagnostic memory graph carries allocation backtraces.
 
         Returns:
             dict: The keeper's combined result, e.g.
@@ -147,6 +151,8 @@ class Keeper:
         params: dict = {"ip": ip, "bundleId": bundle_id}
         if timeout_secs is not None:
             params["timeout_secs"] = int(timeout_secs)
+        if memgraph:
+            params["memgraph"] = "true"
         result = self._request(
             "GET",
             f"/api/runs/{device_udid}/launch",
