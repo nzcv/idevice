@@ -178,12 +178,12 @@ class WindowsHost(HostBase):
     def export(self) -> dict:
         """Export the run's memgraphs via the keeper (keeper presigns + uploads)."""
         logger.info(f"{_LOG_TAG} exporting run for {self.device_udid} not implemented")
-        return {"status": "ok", "action": "export", "path": ""}
+        return {"status": "failed", "action": "export", "path": ""}
 
     def capture_memgraph(self, timeout: float = 60.0) -> dict:
         """Open a measured window that auto-closes after ``5 seconds``."""
         logger.info(f"{_LOG_TAG} capturing memgraph for {self.device_udid} not implemented")
-        return {"status": "ok", "action": "capture_memgraph", "path": ""}
+        return {"status": "failed", "action": "capture_memgraph", "path": ""}
 
     def exit(self) -> dict:
         """Gracefully quit the on-device runner via the keeper.
