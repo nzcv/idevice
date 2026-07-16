@@ -14,7 +14,7 @@ class HostBase(ABC):
 
     A host instance is always bound to a single keeper control server and a
     single target device (``device_udid`` / ``device_ip``). Concrete
-    implementations talk to the EndlessKeeper control server
+    implementations talk to the ikeeper control server
     (:class:`~idevice.host.base.keeper.Keeper`) and the on-device
     RemoteControlTest runner (:class:`~idevice.host.base.runner.Runner`).
     """
@@ -34,7 +34,7 @@ class HostBase(ABC):
 
         Args:
             host_type: Host type identifier (e.g. ``macos``).
-            keeper_ip: EndlessKeeper control-server IP. Required and non-empty.
+            keeper_ip: ikeeper control-server IP. Required and non-empty.
             keeper_port: Keeper control-server port.
             device_udid: Target device UDID. Required and non-empty.
             device_ip: Target device IP. Required and non-empty.
@@ -68,12 +68,12 @@ class HostBase(ABC):
 
     @property
     def keeper_ip(self) -> str:
-        """EndlessKeeper control-server IP bound to this instance."""
+        """ikeeper control-server IP bound to this instance."""
         return self._keeper_ip
 
     @property
     def keeper_port(self) -> int:
-        """EndlessKeeper control-server port bound to this instance."""
+        """ikeeper control-server port bound to this instance."""
         return self._keeper_port
 
     @property

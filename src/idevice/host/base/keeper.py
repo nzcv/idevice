@@ -1,6 +1,6 @@
-"""HTTP client for the EndlessKeeper control server running on the mac host.
+"""HTTP client for the ikeeper control server running on the mac host.
 
-The keeper exposes ``/api/runs`` routes (see ``EndlessKeeper/src/server.rs``) used
+The keeper exposes ``/api/runs`` routes (see ``ikeeper/src/server.rs``) used
 to launch, query, kill, and export xctest runs keyed by device UDID.
 """
 
@@ -19,7 +19,7 @@ _LOG_TAG = "[Keeper]"
 
 
 class Keeper:
-    """Thin client for the EndlessKeeper control server on this machine."""
+    """Thin client for the ikeeper control server on this machine."""
 
     def __init__(self, ip: str, port: int, *, timeout: float | None = None) -> None:
         """Bind the client to a keeper control server.

@@ -1,7 +1,7 @@
 """macOS keeper-backed :class:`HostBase` implementation.
 
 Runs on the **mac host**: :class:`MacHost` drives a run end to end via the
-EndlessKeeper control server (:class:`~idevice.host.base.keeper.Keeper`) and the
+ikeeper control server (:class:`~idevice.host.base.keeper.Keeper`) and the
 on-device RemoteControlTest runner (:class:`~idevice.host.base.runner.Runner`).
 """
 

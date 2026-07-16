@@ -5,7 +5,7 @@ Cross-platform device automation for end-to-end test workflows: install and mana
 The package ships two complementary APIs:
 
 - **`idevice.device`** — local device automation: talk to a USB/network-attached device through platform CLIs (go-ios, pymobiledevice3, adb) to install apps, transfer files, and drive UI.
-- **`idevice.host`** — keeper-backed remote orchestration: drive a memory-measurement run on a host machine that talks to the EndlessKeeper control server and the on-device RemoteControlTest runner over HTTP.
+- **`idevice.host`** — keeper-backed remote orchestration: drive a memory-measurement run on a host machine that talks to the ikeeper control server and the on-device RemoteControlTest runner over HTTP.
 
 ## Platform status
 
@@ -127,7 +127,7 @@ uv run python examples/ios3_device.py \
 uv run python examples/host_example.py --from-env --bundle-id com.example.app
 ```
 
-See the module docstrings in each example for prerequisites (Developer Mode, iOS 17+ tunnel, USB debugging, EndlessKeeper reachability, etc.).
+See the module docstrings in each example for prerequisites (Developer Mode, iOS 17+ tunnel, USB debugging, ikeeper reachability, etc.).
 
 ## API overview
 
@@ -167,7 +167,7 @@ Choose `Platform.IOS` or `Platform.IOS3` depending on which CLI you have deploye
 
 ## Host orchestration (`idevice.host`)
 
-The `host` package drives a memory-measurement run from a **host machine** (mac or Windows). The host never dials the device directly: it talks to the EndlessKeeper control server over HTTP, which in turn proxies the on-device RemoteControlTest runner. A host is always bound to a single keeper and a single target device (`device_udid` / `device_ip`) plus the app `bundle_id` under test.
+The `host` package drives a memory-measurement run from a **host machine** (mac or Windows). The host never dials the device directly: it talks to the ikeeper control server over HTTP, which in turn proxies the on-device RemoteControlTest runner. A host is always bound to a single keeper and a single target device (`device_udid` / `device_ip`) plus the app `bundle_id` under test.
 
 ### Host status
 
@@ -211,7 +211,7 @@ The most recently built host is also reachable anywhere via `Host.Instance`.
 
 ### Lower-level clients
 
-- **`Keeper`** — thin HTTP client for the EndlessKeeper control server (`/api/runs` routes): `launch`, `launch_app`, `status`, `list_runs`, `kill`, `export`, `health`.
+- **`Keeper`** — thin HTTP client for the ikeeper control server (`/api/runs` routes): `launch`, `launch_app`, `status`, `list_runs`, `kill`, `export`, `health`.
 - **`Runner`** — thin HTTP client for the on-device runner, reached through the keeper proxy: `launch_app`, `activate`, `terminate`, `start_measuring` / `stop_measuring` / `measuring_status`, `dt_measuring`, `screenshot`, `tap`, `exit`, `health`.
 
 ## Configuration
@@ -232,7 +232,7 @@ The `idevice.host` orchestrator reads its configuration from the controller-inje
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `GAUTO_HOST_TYPE` | — | Host type (`macos` / `windows` run a real host; others → `DummyHost`) |
-| `GAUTO_HOST_IP` | — | EndlessKeeper control-server IP |
+| `GAUTO_HOST_IP` | — | ikeeper control-server IP |
 | `GAUTO_HOST_PORT` | `18200` | Keeper control-server port |
 | `GAUTO_HOST_ID` | — | Optional keeper/controller id (informational) |
 | `GAUTO_DEVICE_UDID` | — | Target device UDID |

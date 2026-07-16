@@ -11,7 +11,7 @@ placeholders) so the controller can drive any platform without special-casing.
 ```
 test script (idevice.host.Host)
    |
-   '-- Keeper  --> EndlessKeeper control server (mac host, :18000)
+   '-- Keeper  --> ikeeper control server (mac host, :18000)
                      POST   /api/runs                 launch an xctest run
                      GET    /api/runs                 list runs
                      GET    /api/runs/{udid}          run status (echoes server_port)

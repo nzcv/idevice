@@ -1,7 +1,7 @@
 """Windows keeper-backed :class:`HostBase` implementation.
 
 Runs on the **Windows host**: :class:`WindowsHost` drives a run end to end via
-the EndlessKeeper control server (:class:`~idevice.host.base.keeper.Keeper`) and
+the ikeeper control server (:class:`~idevice.host.base.keeper.Keeper`) and
 the on-device RemoteControlTest runner (:class:`~idevice.host.base.runner.Runner`).
 
 The host only ever talks to the keeper over HTTP, so the implementation is

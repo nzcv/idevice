@@ -26,7 +26,7 @@ def host_type() -> str:
 
 
 def keeper_ip() -> str:
-    """Return the EndlessKeeper control-server IP (``GAUTO_HOST_IP``)."""
+    """Return the ikeeper control-server IP (``GAUTO_HOST_IP``)."""
     return os.environ.get("GAUTO_HOST_IP", "")
 
 
@@ -54,7 +54,7 @@ def device_ip() -> str:
 def runner_port() -> int:
     """Return the on-device runner port (``GAUTO_DEVICE_SERVER_PORT``).
 
-    Defaults to the port EndlessKeeper injects into the runner environment.
+    Defaults to the port ikeeper injects into the runner environment.
     """
     raw = os.environ.get("GAUTO_DEVICE_SERVER_PORT")
     return int(raw) if raw else DEFAULT_RUNNER_PORT

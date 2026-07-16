@@ -2,13 +2,13 @@
 """Full :class:`Host` example: keeper-backed iOS memory-measurement workflow.
 
 The host runs on the **mac host** and drives a run end to end: it launches the
-xctest run via the EndlessKeeper control server, waits for the on-device
+xctest run via the ikeeper control server, waits for the on-device
 RemoteControlTest runner to come up, launches the target app, captures a
 memgraph, and optionally exports the captured memory graphs (the keeper presigns
 and uploads the archive itself, returning the download URL).
 
 Prerequisites:
-    - macOS host with the EndlessKeeper control server reachable (default :18000)
+    - macOS host with the ikeeper control server reachable (default :18000)
     - A target iOS device reachable by IP, with the runner installed
     - Either ``--keeper-ip/--device-udid/--device-ip`` flags or the controller's
       ``GAUTO_*`` environment variables (see ``--from-env``)
@@ -121,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     source.add_argument(
         "--keeper-ip",
-        help="EndlessKeeper control-server IP (required unless --from-env)",
+        help="ikeeper control-server IP (required unless --from-env)",
     )
     source.add_argument(
         "--keeper-port",

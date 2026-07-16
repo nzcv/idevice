@@ -2,7 +2,7 @@
 
 The runner embeds a small HTTP server on the iOS device (see
 ``RemoteControlTest/README.md``). The host never dials the device directly:
-requests are sent to the EndlessKeeper control server's runner proxy
+requests are sent to the ikeeper control server's runner proxy
 (``/api/runs/{udid}/proxy``), which forwards them to the on-device runner for
 app control, screenshots, and measurement.
 """

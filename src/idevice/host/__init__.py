@@ -1,7 +1,7 @@
 """Public API for ``HostBase`` and host-type-specific host implementations.
 
 The host drives a measurement run on the **host machine**: it talks to the
-EndlessKeeper control server (:class:`Keeper`) and the on-device
+ikeeper control server (:class:`Keeper`) and the on-device
 RemoteControlTest runner (:class:`Runner`). Build one with :meth:`Host.create`
 / :meth:`Host.from_env`: ``macos`` yields a real :class:`MacHost`, ``windows``
 yields a real :class:`WindowsHost`; every other host type yields a no-op

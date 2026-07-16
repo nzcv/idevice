@@ -16,7 +16,7 @@ class HostTimeoutError(HostError):
 
 
 class KeeperError(HostError):
-    """Raised when an EndlessKeeper control-server request fails."""
+    """Raised when an ikeeper control-server request fails."""
 
     def __init__(
         self,

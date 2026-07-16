@@ -97,7 +97,7 @@ class Host(metaclass=_HostMeta):
             host_type: Target host type (``macos`` and ``windows`` run the
                 keeper-backed host; every other value resolves to a
                 :class:`DummyHost`).
-            keeper_ip: EndlessKeeper control-server IP.
+            keeper_ip: ikeeper control-server IP.
             device_udid: Target device UDID.
             device_ip: Target device IP.
             keeper_port: Keeper control-server port.
