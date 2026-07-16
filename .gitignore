@@ -34,3 +34,4 @@ tests_real/
 
 # tmp/
 tmp/
+uv.lock
