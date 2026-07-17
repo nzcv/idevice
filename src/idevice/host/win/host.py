@@ -178,7 +178,7 @@ class WindowsHost(HostBase):
     def export(self) -> dict:
         """Export the run's memgraphs via the keeper (keeper presigns + uploads)."""
         logger.info(f"{_LOG_TAG} exporting run for {self.device_udid} not implemented")
-        return {"status": "failed", "action": "export", "path": ""}
+        return {"uploaded": False, "archive_bytes": 0, "attachments": [], "bytes": 0, "content_type": "", "download_url": "", "path": ""}
 
     def capture_memgraph(self, timeout: float = 60.0) -> dict:
         """Open a measured window that auto-closes after ``5 seconds``."""
