@@ -174,13 +174,25 @@ class MacHost(HostBase):
 
     def export(self) -> dict:
         """Export the run's memgraphs via the keeper (keeper presigns + uploads)."""
-        logger.info(f"{_LOG_TAG} not implemented exporting run for {self.device_udid}")
-        return {"status": "failed", "action": "export", "path": "not_implemented"}
+        logger.info(f"{_LOG_TAG} exporting run for {self.device_udid}")
+        return self.keeper.export(self.device_udid)
 
     def capture_memgraph(self, timeout: float = 60.0) -> dict:
         """Open a measured window that auto-closes after ``5 seconds``."""
-        logger.info(f"{_LOG_TAG} not implemented capturing memgraph for {self.device_udid}")
-        return {"status": "failed", "action": "capture_memgraph", "path": "not_implemented"}
+        deadline = time.monotonic() + timeout
+        ret = self.runner().dt_measuring(5, self.bundle_id)
+        # wait state to be "stopped"
+        while time.monotonic() < deadline:
+            status = self.runner().measuring_status(timeout=timeout)
+            if status["state"] == "stopped":
+                break
+            logger.info(f"{_LOG_TAG} waiting for memgraph to be captured on {self.device_ip}")
+            time.sleep(1)
+        if time.monotonic() >= deadline:
+            raise HostTimeoutError(
+                f"{_LOG_TAG} memgraph not captured within {timeout}s on {self.device_ip}"
+            )
+        return ret
 
     def exit(self) -> dict:
         """Gracefully quit the on-device runner via the keeper.
