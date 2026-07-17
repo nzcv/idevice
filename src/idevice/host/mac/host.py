@@ -8,9 +8,11 @@ on-device RemoteControlTest runner (:class:`~idevice.host.base.runner.Runner`).
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 from idevice.host import config
+from idevice.host.base.errors import HostTimeoutError
 from idevice.host.base.host import HostBase
 from idevice.host.base.keeper import Keeper
 from idevice.host.base.runner import Runner
