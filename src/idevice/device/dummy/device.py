@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from idevice.device.base.device import DeviceBase
+from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.cache import InstalledAppInfo
 
 logger = logging.getLogger(__name__)
@@ -165,4 +165,9 @@ class DummyDevice(DeviceBase):
     def screenshot(self, local: Path | str) -> bool:
         del local
         self._noop("screenshot")
+        return False
+
+    def pull2(self, data_path: AppDataPath, remote: str, local: Path | str) -> bool:
+        del data_path, remote, local
+        self._noop("pull2")
         return False

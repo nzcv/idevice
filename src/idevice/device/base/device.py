@@ -3,9 +3,26 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from enum import Enum
 from pathlib import Path
 
 from idevice.device.cache import InstalledAppInfo
+
+
+class AppDataPath(Enum):
+    """Unity-style app data roots used by :meth:`DeviceBase.pull2`.
+
+    Local:
+        Roughly ``Application.dataPath`` (Windows: ``*_Data`` next to the
+        installed exe). On iOS3 this maps to the full app-container AFC root
+        (House Arrest without ``documents_only``).
+    Persistent:
+        Roughly ``Application.persistentDataPath`` (Windows LocalLow;
+        iOS/Android Documents / external ``files``).
+    """
+
+    Local = "Local"
+    Persistent = "Persistent"
 
 
 class DeviceBase(ABC):
@@ -380,5 +397,29 @@ class DeviceBase(ABC):
         Raises:
             ValueError: If ``app_id`` or ``remote`` is empty.
             NotImplementedError: On platforms without Documents sandbox access.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def pull2(self, data_path: AppDataPath, remote: str, local: Path | str) -> bool:
+        """Pull a file or directory from Local or Persistent app data.
+
+        Uses the bound :attr:`package_name` as the app id where the platform
+        needs one (iOS / Android). See :class:`AppDataPath` for per-platform
+        root semantics.
+
+        Args:
+            data_path: Which app-data root to read from.
+            remote: Path relative to the chosen data root.
+            local: Destination path on the host.
+
+        Returns:
+            bool: ``True`` if the pull succeeded, ``False`` if the remote path
+                does not exist or the transfer failed.
+
+        Raises:
+            ValueError: If ``remote`` is empty or ``data_path`` is invalid.
+            NotImplementedError: When the platform cannot access that root.
+            FileNotFoundError: When a required install/cache entry is missing.
         """
         raise NotImplementedError

@@ -56,3 +56,10 @@ def test_from_env_requires_package_name_for_android(
     assert isinstance(device, DummyDevice)
     Device.reset()
 
+
+def test_dummy_pull2_is_noop(tmp_path) -> None:
+    from idevice.device.base.device import AppDataPath
+
+    device = DummyDevice("unconfigured")
+    assert device.pull2(AppDataPath.Persistent, "x", tmp_path / "out") is False
+

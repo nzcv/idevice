@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from idevice.device.android.device import AndroidDevice
+from idevice.device.base.device import AppDataPath
 
 APP_ID = "com.android.chrome"
 ROOT = f"/sdcard/Android/data/{APP_ID}/files"
@@ -20,7 +21,7 @@ ROOT = f"/sdcard/Android/data/{APP_ID}/files"
 def device() -> AndroidDevice:
     with patch("idevice.device.android.device.shutil.which", return_value="/usr/bin/adb"):
         with patch("idevice.device.android.device.adb_binary", return_value="adb"):
-            yield AndroidDevice("serial-1")
+            yield AndroidDevice("serial-1", package_name=APP_ID)
 
 
 def _attach_runner(device: AndroidDevice) -> MagicMock:
@@ -160,3 +161,28 @@ def test_documents_methods_validate_args(device: AndroidDevice) -> None:
         device.documents_exists("", "x")
     with pytest.raises(ValueError, match="remote"):
         device.documents_ls(APP_ID, "")
+
+
+def test_pull2_persistent_delegates_to_documents_pull(
+    device: AndroidDevice, tmp_path
+) -> None:
+    runner = _attach_runner(device)
+    # exists check then pull
+    runner.run.side_effect = [
+        MagicMock(returncode=0),
+        MagicMock(returncode=0),
+    ]
+    out = tmp_path / "out.dat"
+    assert device.pull2(AppDataPath.Persistent, "save.dat", out) is True
+    pull_cmd = runner.run.call_args_list[-1].args[0]
+    assert pull_cmd[-2:] == [f"{ROOT}/save.dat", str(out)]
+
+
+def test_pull2_local_not_implemented(device: AndroidDevice, tmp_path) -> None:
+    with pytest.raises(NotImplementedError, match="AppDataPath.Local"):
+        device.pull2(AppDataPath.Local, "x", tmp_path / "out")
+
+
+def test_pull2_rejects_empty_remote(device: AndroidDevice, tmp_path) -> None:
+    with pytest.raises(ValueError, match="remote"):
+        device.pull2(AppDataPath.Persistent, "", tmp_path / "out")

@@ -7,7 +7,7 @@ import logging
 import shutil
 from pathlib import Path
 
-from idevice.device.base.device import DeviceBase
+from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.base.errors import AppNotInstalledError, CommandExecutionError, DeviceNotFoundError
 from idevice.device.base.runner import SubprocessRunner
 from idevice.device.cache import InstalledAppCache, InstalledAppInfo
@@ -345,3 +345,10 @@ class IOSDevice(DeviceBase):
         cmd = [self._binary, "--udid", self.device_id, "screenshot", f"--output={local_path}"]
         result = self._runner.run(cmd, check=False)
         return result.returncode == 0 and local_path.exists()
+
+    def pull2(self, data_path: AppDataPath, remote: str, local: Path | str) -> bool:
+        """Pull Local/Persistent app data (not supported on go-ios)."""
+        del data_path, remote, local
+        raise NotImplementedError(
+            f"{_LOG_TAG} pull2 is not supported on go-ios; use ios3"
+        )

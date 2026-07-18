@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from idevice.device.base.device import AppDataPath
 from idevice.device.cache import InstalledAppInfo
 from idevice.device.windows.device import WindowsDevice
 
@@ -204,4 +205,80 @@ def test_documents_rm_missing_returns_false(windows_device, tmp_path: Path) -> N
     device, _runner, _app_dir = windows_device
     device._doc_dir = tmp_path / "docroot"
     assert device.documents_rm(APP_ID, "nope.txt") is False
+
+
+def test_documents_path_rejects_parent_segments(windows_device) -> None:
+    device, _runner, _app_dir = windows_device
+    with pytest.raises(ValueError, match=r"\.\."):
+        device._documents_path("../escape.txt")
+
+
+def test_exe_dir_uses_cached_exe_parent(windows_device) -> None:
+    device, _runner, app_dir = windows_device
+    exe = _mark_installed(device, app_dir)
+    assert device.exe_dir == exe.parent
+    assert device.exe_dir == app_dir / PKG_VERSION
+
+
+def test_exe_dir_none_when_not_installed(windows_device) -> None:
+    device, _runner, _app_dir = windows_device
+    assert device.exe_dir is None
+
+
+def test_local_path_is_unity_data_dir(windows_device) -> None:
+    device, _runner, app_dir = windows_device
+    _mark_installed(device, app_dir)
+    assert device.local_path == app_dir / PKG_VERSION / "App_Data"
+
+
+def test_local_path_raises_when_not_installed(windows_device) -> None:
+    device, _runner, _app_dir = windows_device
+    with pytest.raises(FileNotFoundError, match="not installed"):
+        _ = device.local_path
+
+
+def test_persistent_path_matches_doc_dir(windows_device) -> None:
+    device, _runner, _app_dir = windows_device
+    assert device.persistent_path == device._doc_dir
+
+
+def test_pull2_local_file(windows_device, tmp_path: Path) -> None:
+    device, _runner, app_dir = windows_device
+    _mark_installed(device, app_dir)
+    data_file = device.local_path / "Player.log"
+    data_file.parent.mkdir(parents=True, exist_ok=True)
+    data_file.write_text("log")
+
+    out = tmp_path / "out" / "Player.log"
+    assert device.pull2(AppDataPath.Local, "Player.log", out) is True
+    assert out.read_text() == "log"
+
+
+def test_pull2_persistent_file(windows_device, tmp_path: Path) -> None:
+    device, _runner, _app_dir = windows_device
+    device._doc_dir = tmp_path / "docroot"
+    src = device._doc_dir / "save.dat"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_text("save")
+
+    out = tmp_path / "pulled.dat"
+    assert device.pull2(AppDataPath.Persistent, "save.dat", out) is True
+    assert out.read_text() == "save"
+
+
+def test_pull2_missing_returns_false(windows_device, tmp_path: Path) -> None:
+    device, _runner, app_dir = windows_device
+    _mark_installed(device, app_dir)
+    device.local_path.mkdir(parents=True, exist_ok=True)
+    assert device.pull2(AppDataPath.Local, "missing.txt", tmp_path / "out.txt") is False
+
+
+def test_pull2_rejects_empty_remote_and_parent_segments(windows_device) -> None:
+    device, _runner, app_dir = windows_device
+    _mark_installed(device, app_dir)
+    out = Path("out.txt")
+    with pytest.raises(ValueError, match="remote is required"):
+        device.pull2(AppDataPath.Local, "", out)
+    with pytest.raises(ValueError, match=r"\.\."):
+        device.pull2(AppDataPath.Local, "../escape.txt", out)
 

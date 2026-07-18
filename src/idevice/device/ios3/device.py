@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pymobiledevice3.services.afc import AfcService
 
-from idevice.device.base.device import DeviceBase
+from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.base.errors import AppNotInstalledError
 from idevice.device.base.runner import SubprocessRunner
 from idevice.device.cache import InstalledAppCache, InstalledAppInfo
@@ -305,8 +305,10 @@ class IOSDevice3(DeviceBase):
         return [line for line in result.stdout.splitlines() if line.strip()]
 
     @asynccontextmanager
-    async def _documents_afc(self, app_id: str) -> AsyncIterator[AfcService]:
-        """Open an AFC session on an app's Documents directory (House Arrest)."""
+    async def _house_arrest_afc(
+        self, app_id: str, *, documents_only: bool
+    ) -> AsyncIterator[AfcService]:
+        """Open a House Arrest AFC session on an app container."""
         from pymobiledevice3.lockdown import create_using_usbmux
         from pymobiledevice3.services.house_arrest import HouseArrestService
         from pymobiledevice3.tunneld.api import TUNNELD_DEFAULT_ADDRESS, get_tunneld_devices
@@ -325,13 +327,30 @@ class IOSDevice3(DeviceBase):
             lockdown = await create_using_usbmux(serial=self.device_id)
         try:
             async with await HouseArrestService.create(
-                lockdown, app_id, documents_only=True
+                lockdown, app_id, documents_only=documents_only
             ) as afc:
                 yield afc
         finally:
             close = getattr(lockdown, "close", None)
             if close is not None:
                 await close()
+
+    @asynccontextmanager
+    async def _documents_afc(self, app_id: str) -> AsyncIterator[AfcService]:
+        """Open an AFC session on an app's Documents directory (House Arrest)."""
+        async with self._house_arrest_afc(app_id, documents_only=True) as afc:
+            yield afc
+
+    @staticmethod
+    def _afc_relative_path(remote: str) -> str:
+        """Normalize ``remote`` to an AFC path under the container root."""
+        rel = remote.strip().replace("\\", "/").lstrip("/")
+        if not rel or rel == ".":
+            raise ValueError("remote is required and must be a non-empty string")
+        parts = [part for part in rel.split("/") if part and part != "."]
+        if any(part == ".." for part in parts):
+            raise ValueError(f"remote path must not contain '..': {remote}")
+        return "/" + "/".join(parts)
 
     def documents_exists(self, app_id: str, remote: str) -> bool:
         if not app_id:
@@ -457,3 +476,37 @@ class IOSDevice3(DeviceBase):
                 f"{_LOG_TAG} Could not read UDID from device entry: {device!r}"
             )
         return str(udid)
+
+    def pull2(self, data_path: AppDataPath, remote: str, local: Path | str) -> bool:
+        """Pull a file or directory from Local or Persistent app data.
+
+        Persistent uses the Documents sandbox (House Arrest ``documents_only``).
+        Local uses the full app container so callers can reach paths such as
+        ``Library/...`` relative to the container root.
+        """
+        if not remote:
+            raise ValueError("remote is required and must be a non-empty string")
+        app_id = self._resolve_app_id(None)
+        if data_path == AppDataPath.Persistent:
+            return self.documents_pull(app_id, remote, local)
+        if data_path == AppDataPath.Local:
+            return self._container_pull(app_id, remote, local)
+        raise ValueError(f"Invalid data path: {data_path}")
+
+    def _container_pull(self, app_id: str, remote: str, local: Path | str) -> bool:
+        """Pull ``remote`` from the full app container (not Documents-only)."""
+        import asyncio
+
+        afc_path = self._afc_relative_path(remote)
+
+        async def main() -> bool:
+            async with self._house_arrest_afc(app_id, documents_only=False) as afc:
+                if not await afc.exists(afc_path):
+                    logger.warning(
+                        f"{_LOG_TAG} Remote path not found: {self.device_id}:{afc_path}"
+                    )
+                    return False
+                await afc.pull(afc_path, local)
+                return True
+
+        return asyncio.run(main())

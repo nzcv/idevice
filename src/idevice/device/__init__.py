@@ -1,7 +1,7 @@
 """Public API for ``DeviceBase`` and platform-specific device implementations."""
 
 from idevice.device.android.device import AndroidDevice
-from idevice.device.base.device import DeviceBase
+from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.base.errors import (
     AppNotInstalledError,
     CommandExecutionError,
@@ -16,6 +16,7 @@ from idevice.device.windows.device import WindowsDevice
 
 __all__ = [
     "AndroidDevice",
+    "AppDataPath",
     "AppNotInstalledError",
     "CommandExecutionError",
     "CommandResult",

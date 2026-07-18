@@ -1,6 +1,6 @@
 """``DeviceBase`` and shared utilities for device control."""
 
-from idevice.device.base.device import DeviceBase
+from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.base.errors import (
     AppNotInstalledError,
     CommandExecutionError,
@@ -10,6 +10,7 @@ from idevice.device.base.errors import (
 from idevice.device.base.runner import CommandResult, SubprocessRunner
 
 __all__ = [
+    "AppDataPath",
     "AppNotInstalledError",
     "CommandExecutionError",
     "CommandResult",

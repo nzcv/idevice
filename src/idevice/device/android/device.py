@@ -10,7 +10,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from idevice.device.base.device import DeviceBase
+from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.base.errors import AppNotInstalledError, DeviceNotFoundError
 from idevice.device.base.runner import SubprocessRunner
 from idevice.device.cache import InstalledAppCache, InstalledAppInfo
@@ -357,6 +357,25 @@ class AndroidDevice(DeviceBase):
         command.extend(["shell", "rm", "-rf", self._shell_quote(path)])
         result = self._runner.run(command, check=False)
         return result.returncode == 0
+
+    def pull2(self, data_path: AppDataPath, remote: str, local: Path | str) -> bool:
+        """Pull a file or directory from Local or Persistent app data.
+
+        Persistent maps to the external ``files`` directory (Unity
+        ``persistentDataPath``). Local (Unity ``dataPath``) is not readable via
+        adb without root, so it raises ``NotImplementedError``.
+        """
+        if not remote:
+            raise ValueError("remote is required and must be a non-empty string")
+        app_id = self._resolve_app_id(None)
+        if data_path == AppDataPath.Persistent:
+            return self.documents_pull(app_id, remote, local)
+        if data_path == AppDataPath.Local:
+            raise NotImplementedError(
+                "[AndroidDevice] AppDataPath.Local (Unity dataPath) is not "
+                "accessible via adb; use AppDataPath.Persistent"
+            )
+        raise ValueError(f"Invalid data path: {data_path}")
 
     def screenshot(self, local: Path | str) -> bool:
         """Capture the screen via ``adb shell screencap`` and pull it to ``local``.

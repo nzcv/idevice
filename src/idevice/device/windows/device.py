@@ -8,7 +8,7 @@ import platform
 import shutil
 from pathlib import Path
 
-from idevice.device.base.device import DeviceBase
+from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.base.runner import SubprocessRunner
 from idevice.device.cache import InstalledAppCache, InstalledAppInfo
 from idevice.device.config import powershell_binary
@@ -37,6 +37,7 @@ class WindowsDevice(DeviceBase):
         )
         self._runner = SubprocessRunner()
         self._company_name = company_name
+        self._product = Path(package_name).stem
         self._app_cache = InstalledAppCache(device_id, cache_dir=cache_dir)
         _app_dir = os.environ.get("IDEVICE_APP_DIR", "D:\\IDeviceExtractedApps")
         self._app_dir = Path(_app_dir)
@@ -207,18 +208,49 @@ class WindowsDevice(DeviceBase):
         if not remote:
             raise ValueError("remote is required and must be a non-empty string")
 
+    @staticmethod
+    def _resolve_under_root(root: Path, remote: str) -> Path:
+        """Resolve ``remote`` relative to ``root`` without escaping the sandbox.
+
+        Leading path separators are stripped so an absolute-looking ``remote``
+        never escapes. ``..`` segments are rejected.
+        """
+        rel = remote.strip().replace("\\", "/").lstrip("/")
+        if not rel or rel == ".":
+            return root
+        parts = [part for part in rel.split("/") if part and part != "."]
+        if any(part == ".." for part in parts):
+            raise ValueError(f"remote path must not contain '..': {remote}")
+        return root.joinpath(*parts)
+
     def _documents_path(self, remote: str) -> Path:
         """Resolve ``remote`` (relative to the Documents root) to a local path.
 
         The Windows Documents sandbox is fixed at construction time (derived from
         ``company_name`` / ``package_name``), so ``remote`` is always interpreted
-        relative to :attr:`_doc_dir`. Leading path separators are stripped so an
-        absolute-looking ``remote`` never escapes the sandbox.
+        relative to :attr:`_doc_dir`.
         """
-        rel = remote.strip().replace("\\", "/").lstrip("/")
-        if not rel or rel == ".":
-            return self._doc_dir
-        return self._doc_dir / rel
+        return self._resolve_under_root(self._doc_dir, remote)
+
+    def _copy_to_local(self, path: Path, local: Path | str) -> bool:
+        """Copy ``path`` (file or directory) to ``local``. Returns success."""
+        local_path = Path(local)
+        logger.info(f"Pulling {self.device_id}:{path} to {local_path}")
+        try:
+            if path.is_dir():
+                dest = local_path / path.name if local_path.is_dir() else local_path
+                shutil.copytree(path, dest, dirs_exist_ok=True)
+            else:
+                if local_path.is_dir():
+                    dest = local_path / path.name
+                else:
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
+                    dest = local_path
+                shutil.copy2(path, dest)
+        except OSError as exc:
+            logger.error(f"Failed to pull {path} to {local_path}: {exc}")
+            return False
+        return True
 
     def documents_exists(self, app_id: str, remote: str) -> bool:
         """Check whether ``remote`` (file or directory) exists in the sandbox."""
@@ -250,23 +282,7 @@ class WindowsDevice(DeviceBase):
         if not path.exists():
             logger.warning(f"Remote path not found: {self.device_id}:{path}")
             return False
-        local_path = Path(local)
-        logger.info(f"Pulling {self.device_id}:{path} to {local_path}")
-        try:
-            if path.is_dir():
-                dest = local_path / path.name if local_path.is_dir() else local_path
-                shutil.copytree(path, dest, dirs_exist_ok=True)
-            else:
-                if local_path.is_dir():
-                    dest = local_path / path.name
-                else:
-                    local_path.parent.mkdir(parents=True, exist_ok=True)
-                    dest = local_path
-                shutil.copy2(path, dest)
-        except OSError as exc:
-            logger.error(f"Failed to pull {path} to {local_path}: {exc}")
-            return False
-        return True
+        return self._copy_to_local(path, local)
 
     def documents_push(self, app_id: str, local: Path | str, remote: str) -> bool:
         """Push a local file or directory into the sandbox at ``remote``."""
@@ -325,3 +341,58 @@ class WindowsDevice(DeviceBase):
             logger.error(f"Failed to capture screenshot to {local_path}: {exc}")
             return False
         return local_path.exists()
+
+    @property
+    def exe_dir(self) -> Path | None:
+        """Return the installed package directory containing the exe, if any."""
+        cached = self._app_cache.get(self._package_name)
+        if cached is None or not cached.path:
+            logger.warning(f"{self._package_name} not found in app cache: {self.device_id}")
+            return None
+        return Path(cached.path).parent        
+
+    @property
+    def local_path(self) -> Path:
+        """Return the Unity ``*_Data`` directory next to the installed exe."""
+        exe_dir = self.exe_dir
+        if exe_dir is None:
+            raise FileNotFoundError(f"App is not installed: {self._package_name}")
+        return exe_dir / f"{self._product}_Data"
+
+    @property
+    def persistent_path(self) -> Path:
+        """Return the app's PersistentDataPath (LocalLow documents) directory."""
+        return self._doc_dir
+
+    def pull2(self, data_path: AppDataPath, remote: str, local: Path | str) -> bool:
+        """Pull a file or directory from Local or Persistent app data.
+
+        Args:
+            data_path: Whether to read from :attr:`local_path` or
+                :attr:`persistent_path`.
+            remote: Path relative to the chosen data root.
+            local: Destination path on the host.
+
+        Returns:
+            bool: ``True`` if the pull succeeded, ``False`` if the remote path
+                does not exist or the transfer failed.
+
+        Raises:
+            ValueError: If ``remote`` is empty, contains ``..``, or
+                ``data_path`` is invalid.
+            FileNotFoundError: If ``data_path`` is Local and the app is not
+                installed.
+        """
+        if not remote:
+            raise ValueError("remote is required and must be a non-empty string")
+        if data_path == AppDataPath.Local:
+            root = self.local_path
+        elif data_path == AppDataPath.Persistent:
+            root = self.persistent_path
+        else:
+            raise ValueError(f"Invalid data path: {data_path}")        
+        path = self._resolve_under_root(root, remote)
+        if not path.exists():
+            logger.warning(f"Remote path not found:{path}")
+            return False
+        return self._copy_to_local(path, local)
