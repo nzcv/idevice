@@ -316,19 +316,16 @@ class WindowsDevice(DeviceBase):
         return True
 
     def screenshot(self, local: Path | str) -> bool:
-        """Capture the host primary screen via PowerShell/.NET System.Drawing."""
+        """Capture the host primary screen via PIL ``ImageGrab``."""
+        from PIL import ImageGrab
+
         local_path = Path(local)
         local_path.parent.mkdir(parents=True, exist_ok=True)
         logger.info(f"Capturing screenshot on {self.device_id} to {local_path}")
-        out = str(local_path.resolve()).replace("'", "''")
-        script = (
-            "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; "
-            "$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; "
-            "$bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height; "
-            "$g = [System.Drawing.Graphics]::FromImage($bmp); "
-            "$g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); "
-            f"$bmp.Save('{out}', [System.Drawing.Imaging.ImageFormat]::Png); "
-            "$g.Dispose(); $bmp.Dispose()"
-        )
-        self._run_powershell(script)
+        try:
+            image = ImageGrab.grab()
+            image.save(local_path)
+        except OSError as exc:
+            logger.error(f"Failed to capture screenshot to {local_path}: {exc}")
+            return False
         return local_path.exists()

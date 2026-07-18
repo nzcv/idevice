@@ -9,6 +9,7 @@ from idevice.device.android.device import AndroidDevice
 from idevice.device.dummy.device import DummyDevice
 from idevice.device.ios.device import IOSDevice
 from idevice.device.ios3.device import IOSDevice3
+from idevice.device.windows.device import WindowsDevice
 
 
 def _ok_runner(*, exists_target: Path) -> MagicMock:
@@ -79,3 +80,18 @@ def test_ios3_screenshot_uses_dvt(tmp_path: Path) -> None:
 def test_dummy_screenshot_returns_false(tmp_path: Path) -> None:
     device = DummyDevice("no device", device_id="", device_ip="", platform="dummy")
     assert device.screenshot(tmp_path / "shot.png") is False
+
+
+def test_windows_screenshot_uses_imagegrab(tmp_path: Path) -> None:
+    out = tmp_path / "shot.png"
+    image = MagicMock()
+    image.save.side_effect = lambda path: Path(path).write_bytes(b"\x89PNG")
+    device = WindowsDevice(
+        "host-1", company_name="Acme", package_name="Game.exe"
+    )
+    with patch("PIL.ImageGrab.grab", return_value=image) as grab:
+        assert device.screenshot(out) is True
+
+    grab.assert_called_once_with()
+    image.save.assert_called_once_with(out)
+    assert out.exists()
