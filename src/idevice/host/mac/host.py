@@ -179,7 +179,7 @@ class MacHost(HostBase):
         logger.info(f"{_LOG_TAG} exporting run for {self.device_udid}")
         return self.keeper.export(self.device_udid)
 
-    def capture_memgraph(self, timeout: float = 120.0) -> dict:
+    def capture_memgraph(self, timeout: float = 720.0) -> dict:
         """Open a measured window that auto-closes after ``5 seconds``."""
         deadline = time.monotonic() + timeout
         ret = self.runner().dt_measuring(5, self.bundle_id)
@@ -189,7 +189,7 @@ class MacHost(HostBase):
             if status["state"] == "stopped":
                 break
             logger.info(f"{_LOG_TAG} waiting for memgraph to be captured on {self.device_ip}")
-            time.sleep(1)
+            time.sleep(10)
         if time.monotonic() >= deadline:
             raise HostTimeoutError(
                 f"{_LOG_TAG} memgraph not captured within {timeout}s on {self.device_ip}"
