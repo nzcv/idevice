@@ -79,14 +79,10 @@ class WindowsDevice(DeviceBase):
         # Remove only this app's extraction dir so other apps are left intact.
         pkg_dir = self._pkg_dir(package_path.name)
         if pkg_dir.exists():
-            script = f"Remove-Item -Path {self._quote(str(pkg_dir))} -Recurse -Force"
-            self._run_powershell(script)
+            shutil.rmtree(pkg_dir)
 
-        script = (
-            f"Expand-Archive -Path {self._quote(str(package_path.resolve()))} "
-            f"-DestinationPath {self._quote(str(self._app_dir))} -Force"
-        )
-        self._run_powershell(script)
+        self._app_dir.mkdir(parents=True, exist_ok=True)
+        shutil.unpack_archive(str(package_path.resolve()), str(self._app_dir))
 
         exe = pkg_dir / app_id
         if not exe.exists():
