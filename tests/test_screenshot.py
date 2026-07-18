@@ -82,16 +82,27 @@ def test_dummy_screenshot_returns_false(tmp_path: Path) -> None:
     assert device.screenshot(tmp_path / "shot.png") is False
 
 
-def test_windows_screenshot_uses_imagegrab(tmp_path: Path) -> None:
+def test_windows_screenshot_uses_mss(tmp_path: Path) -> None:
     out = tmp_path / "shot.png"
-    image = MagicMock()
-    image.save.side_effect = lambda path: Path(path).write_bytes(b"\x89PNG")
+    shot = MagicMock()
+    shot.rgb = b"\x00\x00\x00"
+    shot.size = (1, 1)
+    sct = MagicMock()
+    sct.monitors = [None, {"left": 0, "top": 0, "width": 1, "height": 1}]
+    sct.grab.return_value = shot
+    sct.__enter__.return_value = sct
+    sct.__exit__.return_value = False
     device = WindowsDevice(
         "host-1", company_name="Acme", package_name="Game.exe"
     )
-    with patch("PIL.ImageGrab.grab", return_value=image) as grab:
-        assert device.screenshot(out) is True
+    with patch("mss.mss", return_value=sct) as mss_ctor:
+        with patch("mss.tools.to_png") as to_png:
+            to_png.side_effect = lambda rgb, size, output: Path(output).write_bytes(
+                b"\x89PNG"
+            )
+            assert device.screenshot(out) is True
 
-    grab.assert_called_once_with()
-    image.save.assert_called_once_with(out)
+    mss_ctor.assert_called_once_with()
+    sct.grab.assert_called_once_with(sct.monitors[1])
+    to_png.assert_called_once_with(shot.rgb, shot.size, output=str(out))
     assert out.exists()

@@ -328,16 +328,20 @@ class WindowsDevice(DeviceBase):
         return True
 
     def screenshot(self, local: Path | str) -> bool:
-        """Capture the host primary screen via PIL ``ImageGrab``."""
-        from PIL import ImageGrab
+        """Capture the host primary screen via ``mss``."""
+        import mss
+        from mss.exception import ScreenShotError
+        from mss.tools import to_png
 
         local_path = Path(local)
         local_path.parent.mkdir(parents=True, exist_ok=True)
         logger.info(f"Capturing screenshot on {self.device_id} to {local_path}")
         try:
-            image = ImageGrab.grab()
-            image.save(local_path)
-        except OSError as exc:
+            with mss.mss() as sct:
+                monitor = sct.monitors[1]
+                shot = sct.grab(monitor)
+                to_png(shot.rgb, shot.size, output=str(local_path))
+        except (OSError, ScreenShotError) as exc:
             logger.error(f"Failed to capture screenshot to {local_path}: {exc}")
             return False
         return local_path.exists()
