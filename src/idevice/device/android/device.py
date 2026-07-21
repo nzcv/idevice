@@ -377,6 +377,25 @@ class AndroidDevice(DeviceBase):
             )
         raise ValueError(f"Invalid data path: {data_path}")
 
+    def delete2(self, data_path: AppDataPath, remote: str) -> bool:
+        """Delete a file or directory from Local or Persistent app data.
+
+        Persistent maps to the external ``files`` directory (Unity
+        ``persistentDataPath``). Local (Unity ``dataPath``) is not accessible
+        via adb without root, so it raises ``NotImplementedError``.
+        """
+        if not remote:
+            raise ValueError("remote is required and must be a non-empty string")
+        app_id = self._resolve_app_id(None)
+        if data_path == AppDataPath.Persistent:
+            return self.documents_rm(app_id, remote)
+        if data_path == AppDataPath.Local:
+            raise NotImplementedError(
+                "[AndroidDevice] AppDataPath.Local (Unity dataPath) is not "
+                "accessible via adb; use AppDataPath.Persistent"
+            )
+        raise ValueError(f"Invalid data path: {data_path}")
+
     def screenshot(self, local: Path | str) -> bool:
         """Capture the screen via ``adb shell screencap`` and pull it to ``local``.
 

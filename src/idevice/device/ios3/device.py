@@ -510,3 +510,37 @@ class IOSDevice3(DeviceBase):
                 return True
 
         return asyncio.run(main())
+
+    def delete2(self, data_path: AppDataPath, remote: str) -> bool:
+        """Delete a file or directory from Local or Persistent app data.
+
+        Persistent uses the Documents sandbox (House Arrest ``documents_only``).
+        Local uses the full app container so callers can reach paths such as
+        ``Library/...`` relative to the container root.
+        """
+        if not remote:
+            raise ValueError("remote is required and must be a non-empty string")
+        app_id = self._resolve_app_id(None)
+        if data_path == AppDataPath.Persistent:
+            return self.documents_rm(app_id, remote)
+        if data_path == AppDataPath.Local:
+            return self._container_rm(app_id, remote)
+        raise ValueError(f"Invalid data path: {data_path}")
+
+    def _container_rm(self, app_id: str, remote: str) -> bool:
+        """Delete ``remote`` from the full app container (not Documents-only)."""
+        import asyncio
+
+        afc_path = self._afc_relative_path(remote)
+
+        async def main() -> bool:
+            async with self._house_arrest_afc(app_id, documents_only=False) as afc:
+                if not await afc.exists(afc_path):
+                    logger.warning(
+                        f"{_LOG_TAG} Remote path not found: {self.device_id}:{afc_path}"
+                    )
+                    return False
+                undeleted = await afc.rm(afc_path, force=True)
+                return len(undeleted) == 0
+
+        return asyncio.run(main())

@@ -171,3 +171,8 @@ class DummyDevice(DeviceBase):
         del data_path, remote, local
         self._noop("pull2")
         return False
+
+    def delete2(self, data_path: AppDataPath, remote: str) -> bool:
+        del data_path, remote
+        self._noop("delete2")
+        return False

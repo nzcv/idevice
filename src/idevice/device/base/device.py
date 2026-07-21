@@ -423,3 +423,26 @@ class DeviceBase(ABC):
             FileNotFoundError: When a required install/cache entry is missing.
         """
         raise NotImplementedError
+
+    @abstractmethod
+    def delete2(self, data_path: AppDataPath, remote: str) -> bool:
+        """Delete a file or directory from Local or Persistent app data.
+
+        Uses the bound :attr:`package_name` as the app id where the platform
+        needs one (iOS / Android). See :class:`AppDataPath` for per-platform
+        root semantics.
+
+        Args:
+            data_path: Which app-data root to delete from.
+            remote: Path relative to the chosen data root.
+
+        Returns:
+            bool: ``True`` if the deletion succeeded, ``False`` if the remote
+                path does not exist or the deletion failed.
+
+        Raises:
+            ValueError: If ``remote`` is empty or ``data_path`` is invalid.
+            NotImplementedError: When the platform cannot access that root.
+            FileNotFoundError: When a required install/cache entry is missing.
+        """
+        raise NotImplementedError

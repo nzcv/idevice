@@ -394,9 +394,50 @@ class WindowsDevice(DeviceBase):
         elif data_path == AppDataPath.Persistent:
             root = self.persistent_path
         else:
-            raise ValueError(f"Invalid data path: {data_path}")        
+            raise ValueError(f"Invalid data path: {data_path}")
         path = self._resolve_under_root(root, remote)
         if not path.exists():
-            logger.warning(f"Remote path not found:{path}")
+            logger.warning(f"Remote path not found: {path}")
             return False
         return self._copy_to_local(path, local)
+    
+    def delete2(self, data_path: AppDataPath, remote: str) -> bool:
+        """Delete a file or directory from Local or Persistent app data.
+
+        Args:
+            data_path: Whether to delete from :attr:`local_path` or
+                :attr:`persistent_path`.
+            remote: Path relative to the chosen data root.
+
+        Returns:
+            bool: ``True`` if the deletion succeeded, ``False`` if the remote
+                path does not exist or the deletion failed.
+
+        Raises:
+            ValueError: If ``remote`` is empty, contains ``..``, or
+                ``data_path`` is invalid.
+            FileNotFoundError: If ``data_path`` is Local and the app is not
+                installed.
+        """
+        if not remote:
+            raise ValueError("remote is required and must be a non-empty string")
+        if data_path == AppDataPath.Local:
+            root = self.local_path
+        elif data_path == AppDataPath.Persistent:
+            root = self.persistent_path
+        else:
+            raise ValueError(f"Invalid data path: {data_path}")
+        path = self._resolve_under_root(root, remote)
+        if not path.exists():
+            logger.warning(f"Remote path not found: {path}")
+            return False
+        logger.info(f"Deleting {self.device_id}:{path}")
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        except OSError as exc:
+            logger.error(f"Failed to delete {path}: {exc}")
+            return False
+        return True

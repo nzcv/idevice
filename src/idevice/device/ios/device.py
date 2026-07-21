@@ -352,3 +352,10 @@ class IOSDevice(DeviceBase):
         raise NotImplementedError(
             f"{_LOG_TAG} pull2 is not supported on go-ios; use ios3"
         )
+
+    def delete2(self, data_path: AppDataPath, remote: str) -> bool:
+        """Delete Local/Persistent app data (not supported on go-ios)."""
+        del data_path, remote
+        raise NotImplementedError(
+            f"{_LOG_TAG} delete2 is not supported on go-ios; use ios3"
+        )
