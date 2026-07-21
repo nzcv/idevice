@@ -21,6 +21,7 @@ DEFAULT_SCRCPY_VIDEO_BIT_RATE = "4M"
 DEFAULT_STOP_TIMEOUT = 15.0
 DEFAULT_FFMPEG_BINARY = "ffmpeg.exe"
 DEFAULT_FFMPEG_FRAMERATE = 30
+DEFAULT_RECORD_RETENTION_DAYS = 1
 
 
 def record_type() -> str:
@@ -77,6 +78,21 @@ def record_output_dir() -> Path:
     if raw:
         return Path(raw)
     return Path.home() / ".idevice" / "records"
+
+
+def record_retention_days() -> int:
+    """Return how many days recordings are kept (``IDEVICE_RECORD_RETENTION_DAYS``).
+
+    The Windows and Android recorders prune ``*.mp4`` files older than this many
+    days from :func:`record_output_dir` at the start of every recording. Defaults
+    to :data:`DEFAULT_RECORD_RETENTION_DAYS`; set the env var to ``0`` (or a
+    negative value) to disable the cleanup entirely.
+
+    Returns:
+        The retention window in whole days; ``<= 0`` disables cleanup.
+    """
+    raw = os.environ.get("IDEVICE_RECORD_RETENTION_DAYS")
+    return int(raw) if raw else DEFAULT_RECORD_RETENTION_DAYS
 
 
 def scrcpy_extra_args() -> list[str]:

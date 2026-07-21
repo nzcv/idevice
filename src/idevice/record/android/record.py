@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from idevice.record import config
+from idevice.record.base.cleanup import cleanup_old_recordings
 from idevice.record.base.errors import RecordError
 from idevice.record.base.record import RecordBase
 
@@ -197,6 +198,7 @@ class AndroidRecord(RecordBase):
             return self.status()
 
         self._output_dir.mkdir(parents=True, exist_ok=True)
+        cleanup_old_recordings(self._output_dir, config.record_retention_days())
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_udid = re.sub(r"[^A-Za-z0-9._-]", "_", self._device_udid)
         output_path = self._output_dir / f"{safe_udid}_{stamp}.mp4"
