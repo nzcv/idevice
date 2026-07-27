@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import time
+import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from idevice.device.base.cleanup import cleanup_old_packages
 from idevice.device.base.device import AppDataPath
 from idevice.device.cache import InstalledAppInfo
 from idevice.device.windows.device import WindowsDevice
@@ -281,4 +285,77 @@ def test_pull2_rejects_empty_remote_and_parent_segments(windows_device) -> None:
         device.pull2(AppDataPath.Local, "", out)
     with pytest.raises(ValueError, match=r"\.\."):
         device.pull2(AppDataPath.Local, "../escape.txt", out)
+
+
+def _make_package_zip(tmp_path: Path) -> Path:
+    """Build a ``MyApp_v1.zip`` that extracts to ``MyApp_v1/App.exe``."""
+    package = tmp_path / PKG_NAME
+    with zipfile.ZipFile(package, "w") as zf:
+        zf.writestr(f"{PKG_VERSION}/{APP_ID}", "")
+    return package
+
+
+def _backdate(path: Path, days: float) -> None:
+    """Set ``path`` mtime/atime to ``days`` in the past."""
+    old = time.time() - days * 86400
+    os.utime(path, (old, old))
+
+
+def test_install_prunes_stale_package_dirs(windows_device, tmp_path: Path) -> None:
+    device, _runner, app_dir = windows_device
+    stale = app_dir / "OldApp_v0"
+    stale.mkdir(parents=True)
+    (stale / "leftover.txt").write_text("x")
+    _backdate(stale, days=2)
+
+    fresh = app_dir / "RecentApp"
+    fresh.mkdir(parents=True)
+
+    package = _make_package_zip(tmp_path)
+    assert device.install(package, app_id=APP_ID) is True
+
+    assert not stale.exists()
+    assert fresh.exists()
+    assert (app_dir / PKG_VERSION / APP_ID).exists()
+
+
+def test_install_keeps_stale_dirs_when_retention_disabled(
+    windows_device, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    device, _runner, app_dir = windows_device
+    monkeypatch.setenv("IDEVICE_APP_RETENTION_DAYS", "0")
+    stale = app_dir / "OldApp_v0"
+    stale.mkdir(parents=True)
+    _backdate(stale, days=5)
+
+    package = _make_package_zip(tmp_path)
+    assert device.install(package, app_id=APP_ID) is True
+
+    assert stale.exists()
+
+
+def test_cleanup_old_packages_skips_files_and_removes_old_dirs(tmp_path: Path) -> None:
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    _backdate(old_dir, days=3)
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    stray_file = tmp_path / "stray.txt"
+    stray_file.write_text("keep")
+    _backdate(stray_file, days=10)
+
+    assert cleanup_old_packages(tmp_path, retention_days=1) == 1
+    assert not old_dir.exists()
+    assert new_dir.exists()
+    assert stray_file.exists()
+
+
+def test_cleanup_old_packages_noop_when_disabled_or_missing(tmp_path: Path) -> None:
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    _backdate(old_dir, days=3)
+
+    assert cleanup_old_packages(tmp_path, retention_days=0) == 0
+    assert old_dir.exists()
+    assert cleanup_old_packages(tmp_path / "missing", retention_days=1) == 0
 

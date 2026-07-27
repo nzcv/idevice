@@ -8,10 +8,11 @@ import platform
 import shutil
 from pathlib import Path
 
+from idevice.device.base.cleanup import cleanup_old_packages
 from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.base.runner import SubprocessRunner
 from idevice.device.cache import InstalledAppCache, InstalledAppInfo
-from idevice.device.config import powershell_binary
+from idevice.device.config import app_retention_days, powershell_binary
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,9 @@ class WindowsDevice(DeviceBase):
             raise ValueError("Package must be a zip file")
         if app_id is None:
             raise ValueError("app_id is required")
+
+        # Prune stale extractions so old package versions do not accumulate.
+        cleanup_old_packages(self._app_dir, app_retention_days())
 
         # Remove only this app's extraction dir so other apps are left intact.
         pkg_dir = self._pkg_dir(package_path.name)

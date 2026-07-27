@@ -6,6 +6,8 @@ import os
 import sys
 from pathlib import Path
 
+DEFAULT_APP_RETENTION_DAYS = 1
+
 
 def ios_binary() -> str:
     """Return the go-ios CLI binary path."""
@@ -34,6 +36,21 @@ def powershell_binary() -> str:
 def user_data_dir() -> Path:
     """Return the default directory for idevice user data."""
     return Path.home() / ".idevice"
+
+
+def app_retention_days() -> int:
+    """Return how many days extracted packages are kept (``IDEVICE_APP_RETENTION_DAYS``).
+
+    The Windows device prunes extracted package directories older than this many
+    days from its app directory at the start of every installation. Defaults to
+    :data:`DEFAULT_APP_RETENTION_DAYS`; set the env var to ``0`` (or a negative
+    value) to disable the cleanup entirely.
+
+    Returns:
+        The retention window in whole days; ``<= 0`` disables cleanup.
+    """
+    raw = os.environ.get("IDEVICE_APP_RETENTION_DAYS")
+    return int(raw) if raw else DEFAULT_APP_RETENTION_DAYS
 
 
 def platform() -> str:
