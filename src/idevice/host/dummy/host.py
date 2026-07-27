@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 from idevice.host import config
@@ -82,10 +83,11 @@ class DummyHost(HostBase):
     def launch_app(
         self,
         *,
+        args: Sequence[str] | str | None = None,
         timeout: float = config.DEFAULT_READY_TIMEOUT,
         memgraph: bool = False,
     ) -> dict:
-        del timeout, memgraph
+        del args, timeout, memgraph
         return self._noop("launch_app")
 
     def capture_memgraph(self, timeout: float = 60.0) -> dict:

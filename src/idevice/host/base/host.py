@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from pathlib import Path
 
 from idevice.host import config
@@ -114,12 +115,18 @@ class HostBase(ABC):
     def launch_app(
         self,
         *,
+        args: Sequence[str] | str | None = None,
         timeout: float = config.DEFAULT_READY_TIMEOUT,
         memgraph: bool = False,
     ) -> dict:
         """Launch the bound ``bundle_id`` and make sure it comes up running.
 
         Args:
+            args: Command-line arguments for the app, as a list or an
+                already-formatted shell-style string. The runner applies them
+                as ``XCUIApplication.launchArguments``, which is how engine
+                BootConfig values are overridden at launch (argv wins over
+                ``boot.config``), e.g. ``["-hg-mmap-allocater", "0"]``.
             timeout: Overall budget in seconds covering runner restart,
                 readiness, and the launch itself.
             memgraph: When ``True``, cold-launch with performance diagnostics

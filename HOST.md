@@ -15,7 +15,7 @@ test script (idevice.host.Host)
                      POST   /api/runs                 launch an xctest run
                      GET    /api/runs                 list runs
                      GET    /api/runs/{udid}          run status (echoes server_port)
-                     GET    /api/runs/{udid}/launch   launch a run + the app (?ip=&bundleId=)
+                     GET    /api/runs/{udid}/launch   launch a run + the app (?ip=&bundleId=&args=)
                      DELETE /api/runs/{udid}          kill a run
                      POST   /api/runs/{udid}/export   export memgraphs -> keeper presigns + uploads
                      ANY    /api/runs/{udid}/proxy/{*path}  forward to the on-device runner
@@ -107,4 +107,25 @@ host.kill()                         # DELETE /api/runs/{udid}
 
 The thin clients are also available directly via `host.keeper` and `host.runner()`.
 The most recently built host is reachable anywhere via `Host.Instance`.
+
+## Launch arguments
+
+`launch_app` accepts `args`, the app's command-line arguments. They reach the device as
+`XCUIApplication.launchArguments`, so this is how engine BootConfig values are overridden
+for a run — argv takes priority over `boot.config`, `boot_hgjs.json`, and Remote Boot.
+
+```python
+# Force the MMAP allocator off regardless of the device's physical memory
+host.launch_app(args=["-hg-mmap-allocater", "0"])
+
+# Several parameters at once, with memgraph capture enabled
+host.launch_app(
+    args=["-hg-mmap-allocater", "10000", "-hg-mmap-allocater-v2", "false"],
+    memgraph=True,
+)
 ```
+
+Pass a list (each element is quoted for you, so values may contain spaces) or an
+already-formatted shell-style string such as `"-hg-mmap-allocater 0"`. The keeper
+forwards it to the runner, which splits it on unquoted whitespace, honouring `'...'`,
+`"..."`, and `\`.

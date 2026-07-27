@@ -7,6 +7,8 @@ to launch, query, kill, and export xctest runs keyed by device UDID.
 from __future__ import annotations
 
 import logging
+import shlex
+from collections.abc import Sequence
 
 import requests
 
@@ -16,6 +18,19 @@ from idevice.host.base.errors import KeeperError
 logger = logging.getLogger(__name__)
 
 _LOG_TAG = "[Keeper]"
+
+
+def _join_args(args: Sequence[str] | str | None) -> str | None:
+    """Render app launch arguments as the single shell-style string the keeper takes.
+
+    A list is quoted and joined so arguments containing spaces survive the trip
+    through the keeper and the runner's splitter; a string is passed through
+    untouched. Returns ``None`` when there is nothing to send.
+    """
+    if args is None:
+        return None
+    text = args.strip() if isinstance(args, str) else shlex.join(str(arg) for arg in args)
+    return text or None
 
 
 class Keeper:
@@ -115,6 +130,7 @@ class Keeper:
         *,
         ip: str,
         bundle_id: str,
+        args: Sequence[str] | str | None = None,
         timeout_secs: int | None = None,
         timeout: float | None = None,
         memgraph: bool = False,
@@ -130,6 +146,9 @@ class Keeper:
             ip: Device IP the keeper records as ``device_host`` and proxies the
                 runner through.
             bundle_id: Bundle id of the app to launch.
+            args: Command-line arguments for the app, as a list (quoted and
+                joined here) or an already-formatted shell-style string. The
+                runner applies them as ``XCUIApplication.launchArguments``.
             timeout_secs: Keeper-side budget covering build, runner startup, and
                 launch; ``None`` uses the keeper's default (300s).
             timeout: Per-request HTTP timeout; must exceed ``timeout_secs`` since
@@ -149,6 +168,9 @@ class Keeper:
         if not bundle_id:
             raise ValueError("bundle_id is required and must be a non-empty string")
         params: dict = {"ip": ip, "bundleId": bundle_id}
+        joined_args = _join_args(args)
+        if joined_args is not None:
+            params["args"] = joined_args
         if timeout_secs is not None:
             params["timeout_secs"] = int(timeout_secs)
         if memgraph:

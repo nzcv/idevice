@@ -203,6 +203,10 @@ summary = host.export()             # keeper presigns + uploads; returns downloa
 host.screenshot("shot.png")         # capture one screenshot via the runner proxy
 host.tap(0.5, 0.5)                  # tap at normalized screen coordinates
 host.kill()                         # tear down the keeper run
+
+# Launch with command-line arguments, applied as XCUIApplication.launchArguments.
+# Engine BootConfig values can be overridden this way, since argv beats boot.config:
+host.launch_app(args=["-hg-mmap-allocater", "0"])
 ```
 
 The most recently built host is also reachable anywhere via `Host.Instance`.

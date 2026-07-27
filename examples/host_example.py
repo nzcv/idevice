@@ -29,6 +29,11 @@ Examples:
     uv run python examples/host_example.py --from-env \\
         --bundle-id com.rm42.TrashDash --export
 
+    # Override engine BootConfig values via argv (argv beats boot.config)
+    uv run python examples/host_example.py --from-env \\
+        --bundle-id com.rm42.TrashDash \\
+        --launch-args="-hg-mmap-allocater 0 -hg-mmap-allocater-v2 false"
+
     # Health probe only (keeper reachability), verbose logging
     uv run python examples/host_example.py --from-env --health-only -v
 """
@@ -84,7 +89,7 @@ def _demo_capture(host: HostBase, args: argparse.Namespace) -> dict:
         args.bundle_id,
         host.device_udid,
     )
-    host.launch_app(timeout=args.ready_timeout)
+    host.launch_app(args=args.launch_args, timeout=args.ready_timeout)
     result = host.capture_memgraph(timeout=args.capture_timeout)
     summary = {"capture": result}
     if args.export:
@@ -97,7 +102,7 @@ def _demo_capture(host: HostBase, args: argparse.Namespace) -> dict:
 def _demo_steps(host: HostBase, args: argparse.Namespace) -> None:
     """Drive each step explicitly so failures localize to a single call."""
     logger.info("Launching app %s on %s", args.bundle_id, host.device_udid)
-    launch_result = host.launch_app(timeout=args.ready_timeout)
+    launch_result = host.launch_app(args=args.launch_args, timeout=args.ready_timeout)
     logger.info("Launch result:\n%s", json.dumps(launch_result, indent=2, default=str))
 
     logger.info("Capturing memgraph (timeout=%.0fs)", args.capture_timeout)
@@ -148,6 +153,15 @@ def main(argv: list[str] | None = None) -> int:
         "--bundle-id",
         default=DEFAULT_BUNDLE_ID,
         help=f"App bundle id to measure (default: {DEFAULT_BUNDLE_ID})",
+    )
+    run.add_argument(
+        "--launch-args",
+        default=None,
+        help=(
+            "Command-line arguments for the app, as one shell-style string "
+            "applied as XCUIApplication.launchArguments, e.g. "
+            '--launch-args="-hg-mmap-allocater 0"'
+        ),
     )
     run.add_argument(
         "--capture-timeout",

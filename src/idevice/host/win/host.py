@@ -12,6 +12,7 @@ and exists to give Windows controllers a real, non-dummy host.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 from idevice.host import config
@@ -107,6 +108,7 @@ class WindowsHost(HostBase):
     def launch_app(
         self,
         *,
+        args: Sequence[str] | str | None = None,
         timeout: float = config.DEFAULT_READY_TIMEOUT,
         memgraph: bool = False,
     ) -> dict:
@@ -120,6 +122,9 @@ class WindowsHost(HostBase):
         the keeper guarantees the device is free before relaunching.
 
         Args:
+            args: Command-line arguments for the app, as a list or an
+                already-formatted shell-style string, e.g.
+                ``["-hg-mmap-allocater", "0"]``.
             timeout: Overall budget in seconds covering build, runner startup,
                 and the launch itself; passed to the keeper as ``timeout_secs``.
             memgraph: Accepted for API parity; Windows does not support memgraph
@@ -141,6 +146,7 @@ class WindowsHost(HostBase):
             self.device_udid,
             ip=self.device_ip,
             bundle_id=self.bundle_id,
+            args=args,
             timeout_secs=int(timeout),
             # Hold the HTTP request open a bit longer than the keeper's own
             # budget, since it blocks until the launch finishes.
