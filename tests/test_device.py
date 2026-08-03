@@ -63,3 +63,25 @@ def test_dummy_pull2_is_noop(tmp_path) -> None:
     device = DummyDevice("unconfigured")
     assert device.pull2(AppDataPath.Persistent, "x", tmp_path / "out") is False
 
+
+def test_ping_empty_ip_returns_false() -> None:
+    device = DummyDevice("unconfigured", device_ip="")
+    assert device.ping() is False
+
+
+def test_ping_uses_subprocess_returncode(monkeypatch: pytest.MonkeyPatch) -> None:
+    from idevice.device.base import device as device_mod
+
+    calls: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):  # noqa: ANN001
+        calls.append(list(command))
+        return type("R", (), {"returncode": 0})()
+
+    monkeypatch.setattr(device_mod.subprocess, "run", fake_run)
+    device = DummyDevice("unconfigured", device_ip="10.0.0.1")
+    assert device.ping() is True
+    assert calls and calls[0][-1] == "10.0.0.1"
+    assert device.ping("192.168.1.1") is True
+    assert calls[-1][-1] == "192.168.1.1"
+

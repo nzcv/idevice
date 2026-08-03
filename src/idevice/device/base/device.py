@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import logging
+import platform
+import subprocess
 from abc import ABC, abstractmethod
 from enum import Enum
 from pathlib import Path
+from typing import Optional
 
 from idevice.device.cache import InstalledAppInfo
+
+logger = logging.getLogger(__name__)
 
 
 class AppDataPath(Enum):
@@ -89,6 +95,54 @@ class DeviceBase(ABC):
         if not target:
             raise ValueError("app_id is required and must be a non-empty string")
         return target
+
+    def ping(self, ip: Optional[str] = None, *, timeout: float = 1.0) -> bool:
+        """Return ``True`` if ``ip`` is reachable via ICMP ping.
+
+        Args:
+            ip: Address to probe. Defaults to the bound :attr:`device_ip`.
+            timeout: Per-probe wait budget in seconds.
+
+        Returns:
+            bool: ``True`` if a reply was received, ``False`` if the address is
+            empty, the probe timed out, or ping failed for any other reason.
+        """
+        target = (ip if ip is not None else self._device_ip).strip()
+        if not target:
+            logger.debug("[DeviceBase] ping skipped: empty ip")
+            return False
+        if timeout <= 0:
+            raise ValueError("timeout must be positive")
+
+        system = platform.system().lower()
+        timeout_ms = max(1, int(timeout * 1000))
+        if system == "windows":
+            command = ["ping", "-n", "1", "-w", str(timeout_ms), target]
+        elif system == "darwin":
+            command = ["ping", "-c", "1", "-W", str(timeout_ms), target]
+        else:
+            command = ["ping", "-c", "1", "-W", str(max(1, int(timeout))), target]
+
+        kwargs: dict = {
+            "capture_output": True,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+            "timeout": timeout + 1.0,
+            "check": False,
+        }
+        if system == "windows":
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+        try:
+            completed = subprocess.run(command, **kwargs)
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.debug(f"[DeviceBase] ping {target} failed: {exc}")
+            return False
+
+        ok = completed.returncode == 0
+        logger.debug(f"[DeviceBase] ping {target}: {'ok' if ok else 'unreachable'}")
+        return ok
 
     @classmethod
     @abstractmethod
