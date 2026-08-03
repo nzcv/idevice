@@ -8,7 +8,6 @@ import subprocess
 from abc import ABC, abstractmethod
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 from idevice.device.cache import InstalledAppInfo
 
@@ -96,7 +95,7 @@ class DeviceBase(ABC):
             raise ValueError("app_id is required and must be a non-empty string")
         return target
 
-    def ping(self, ip: Optional[str] = None, *, timeout: float = 1.0) -> bool:
+    def ping(self, ip: str | None = None, *, timeout: float = 1.0) -> bool:
         """Return ``True`` if ``ip`` is reachable via ICMP ping.
 
         Args:
