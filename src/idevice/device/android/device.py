@@ -95,11 +95,14 @@ class AndroidDevice(DeviceBase):
         if not package_path.exists():
             raise FileNotFoundError(f"Package not found: {package_path}")
 
-        # Uninstall any existing package so signature mismatches do not block install.
-        try:
-            self.uninstall(app_id)
-        except Exception as exc:
-            logger.info(f"Failed to uninstall existing package: {exc}")
+        # Uninstall an explicitly identified package so signature mismatches do
+        # not block installation. Without an app id, ``adb uninstall`` cannot
+        # build a valid command and ``adb install -r`` should handle upgrades.
+        if app_id:
+            try:
+                self.uninstall(app_id)
+            except Exception as exc:
+                logger.info(f"Failed to uninstall existing package: {exc}")
 
         try:
             cmd = self._base_command()
@@ -424,13 +427,30 @@ class AndroidDevice(DeviceBase):
 
         logger.info(f"install with uiautomator2: {cmd}")
         d = u2.connect(device_id) if device_id else u2.connect()
-        # autostart=False so we can register rules before the background thread runs.
-        with d.watch_context(builtin=True, autostart=False) as ctx:
-            # Builtin rules cover common install prompts (继续安装, ALLOW, Agree, …).
-            ctx.when("仍要安装").click()
-            ctx.when("Install").click()
-            ctx.start()
-            p = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+
+        def acknowledge_install_risk(el) -> None:
+            """Retry an OEM risk checkbox until the UI reports it checked."""
+            if el.attrib.get("checked") == "true":
+                return
+            el.click()
+            logger.info("clicked unchecked OEM app-install risk prompt")
+
+        # Keep the OEM acknowledgement in a separate watcher. The builtin
+        # watcher may repeatedly click a disabled ``继续安装`` button, while vivo
+        # requires the risk checkbox to be selected before that button is
+        # enabled. A separate watcher lets both rules make progress.
+        with d.watch_context(builtin=False, autostart=False) as risk_ctx:
+            risk_ctx.when("已了解应用的风险检测结果").call(acknowledge_install_risk)
+            risk_ctx.when("我已了解应用的风险检测结果").call(acknowledge_install_risk)
+            risk_ctx.start()
+
+            # autostart=False so all rules exist before the watcher starts.
+            with d.watch_context(builtin=True, autostart=False) as ctx:
+                # Builtin rules cover common prompts (继续安装, ALLOW, Agree, …).
+                ctx.when("仍要安装").click()
+                ctx.when("Install").click()
+                ctx.start()
+                p = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
 
         if p.returncode == 0:
             self._dismiss_post_install_popups(d)
