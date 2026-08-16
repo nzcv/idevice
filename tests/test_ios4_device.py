@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from idevice.device.base.errors import AppNotInstalledError, DeviceNotFoundError
 from idevice.device.base.runner import CommandResult
@@ -42,6 +43,15 @@ def result(
 ) -> CommandResult:
     """Create a subprocess result for mocked runner calls."""
     return CommandResult(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def response(status_code: int = 200, content: bytes = b"") -> MagicMock:
+    """Create a requests-style response for mocked iwda2 calls."""
+    stub = MagicMock()
+    stub.status_code = status_code
+    stub.content = content
+    stub.text = content.decode("utf-8", "replace")
+    return stub
 
 
 def test_install_prefers_standalone_ideviceinstaller(
@@ -227,30 +237,13 @@ def test_run_iwda2_starts_background_xctest_client(
         "idevice.device.ios4.device.subprocess.Popen", return_value=process
     ) as popen:
         with patch("idevice.device.ios4.device.time.sleep"):
-            startup_thread = ios4_device.run_iwda2(
-                target_bundle_id=APP_ID,
-                server_port=19001,
-                dialog_scan_interval=0.25,
-                max_session_seconds=1800,
-                command_timeout_seconds=15,
-            )
+            startup_thread = ios4_device.run_iwda2()
             startup_thread.join(timeout=1)
 
     assert startup_thread.is_alive() is False
     assert ios4_device.iwda2_process_id == 7312
     popen.assert_called_once_with(
-        [
-            BINARY,
-            "--udid",
-            UDID,
-            "xctest",
-            "--env",
-            "SERVER_PORT=19001,AUTO_DISMISS_DIALOGS=true,"
-            "DIALOG_SCAN_INTERVAL=0.25,MAX_SESSION_SECONDS=1800,"
-            f"COMMAND_TIMEOUT_SECONDS=15,TARGET_BUNDLE_ID={APP_ID}",
-            IWDA2_RUNNER_ID,
-            APP_ID,
-        ],
+        [BINARY, "--udid", UDID, "xctest", IWDA2_RUNNER_ID],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.STDOUT,
         text=True,
@@ -316,24 +309,20 @@ def test_run_iwda2_waits_for_http_health(tmp_path: Path) -> None:
     process = MagicMock()
     process.pid = 7313
     process.poll.return_value = None
-    response = MagicMock()
-    response.status = 200
-    response.__enter__.return_value = response
 
     with patch(
         "idevice.device.ios4.device.subprocess.Popen", return_value=process
     ):
         with patch(
-            "idevice.device.ios4.device.urllib.request.urlopen",
-            return_value=response,
-        ) as urlopen:
-            startup_thread = device.run_iwda2(server_port=19002)
+            "idevice.device.ios4.device.requests.get", return_value=response()
+        ) as http_get:
+            startup_thread = device.run_iwda2()
             startup_thread.join(timeout=1)
 
     assert startup_thread.is_alive() is False
     assert device.iwda2_process_id == 7313
-    urlopen.assert_called_once_with(
-        "http://192.0.2.10:19002/api/health", timeout=1
+    http_get.assert_called_once_with(
+        "http://192.0.2.10:18200/api/health", timeout=1
     )
 
 
@@ -345,18 +334,14 @@ def test_stop_iwda2_requests_exit_on_configured_port(
     process = MagicMock()
     process.poll.side_effect = [None, None, 0]
     ios4_device._iwda2_process = process
-    ios4_device._iwda2_server_port = 19003
-    response = MagicMock()
-    response.__enter__.return_value = response
 
     with patch(
-        "idevice.device.ios4.device.urllib.request.urlopen",
-        return_value=response,
-    ) as urlopen:
+        "idevice.device.ios4.device.requests.get", return_value=response()
+    ) as http_get:
         ios4_device.stop_iwda2(timeout=5)
 
-    urlopen.assert_called_once_with(
-        "http://192.0.2.10:19003/api/exit", timeout=3
+    http_get.assert_called_once_with(
+        "http://192.0.2.10:18200/api/exit", timeout=3
     )
     process.wait.assert_called_once_with(timeout=5)
     process.terminate.assert_not_called()
@@ -515,6 +500,103 @@ def test_stop_raises_when_pkill_fails(ios4_device: IOSDevice4) -> None:
 
     with pytest.raises(IOSDevice4Error, match="Failed to stop"):
         ios4_device.stop_app()
+
+
+def test_screenshot_uses_the_ios4_screenshot_service(
+    ios4_device: IOSDevice4, tmp_path: Path
+) -> None:
+    ios4_device._device_ip = "192.0.2.10"
+    output = tmp_path / "shots" / "screen.png"
+
+    def capture(command: list[str], **_kwargs: object) -> CommandResult:
+        Path(command[-1]).write_bytes(b"\x89PNG")
+        return result()
+
+    ios4_device._runner.run.side_effect = capture
+
+    assert ios4_device.screenshot(output) is True
+
+    ios4_device._runner.run.assert_called_once_with(
+        [BINARY, "--udid", UDID, "screenshot", str(output)], check=False
+    )
+    assert output.read_bytes() == b"\x89PNG"
+
+
+def test_tap_omits_the_bundle_id_when_no_app_id_is_given(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._device_ip = "192.0.2.10"
+
+    with patch(
+        "idevice.device.ios4.device.requests.get",
+        return_value=response(content=b'{"status": "ok"}'),
+    ) as http_get:
+        ios4_device.tap(0.5, 0.25)
+
+    http_get.assert_called_once_with(
+        "http://192.0.2.10:18200/api/tap",
+        params={"x": "0.5", "y": "0.25"},
+        timeout=30.0,
+    )
+
+
+def test_tap_uses_the_default_port_and_explicit_app_id(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._device_ip = "192.0.2.10"
+
+    with patch(
+        "idevice.device.ios4.device.requests.get",
+        return_value=response(content=b'{"status": "ok"}'),
+    ) as http_get:
+        ios4_device.tap(0, 1, app_id="com.example.other")
+
+    http_get.assert_called_once_with(
+        "http://192.0.2.10:18200/api/tap",
+        params={"x": "0", "y": "1", "bundleId": "com.example.other"},
+        timeout=30.0,
+    )
+
+
+def test_tap_rejects_coordinates_outside_the_unit_square(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._device_ip = "192.0.2.10"
+
+    with patch("idevice.device.ios4.device.requests.get") as http_get:
+        with pytest.raises(ValueError, match="x must be a normalized coordinate"):
+            ios4_device.tap(1.5, 0.5)
+        with pytest.raises(ValueError, match="y must be a normalized coordinate"):
+            ios4_device.tap(0.5, -0.1)
+
+    http_get.assert_not_called()
+
+
+def test_tap_requires_a_device_ip(ios4_device: IOSDevice4) -> None:
+    with pytest.raises(IOSDevice4Error, match="device_ip is required"):
+        ios4_device.tap(0.5, 0.5)
+
+
+def test_tap_reports_an_iwda2_error_response(ios4_device: IOSDevice4) -> None:
+    ios4_device._device_ip = "192.0.2.10"
+
+    with patch(
+        "idevice.device.ios4.device.requests.get",
+        return_value=response(status_code=400, content=b'{"status": "error"}'),
+    ):
+        with pytest.raises(IOSDevice4Error, match="returned HTTP 400"):
+            ios4_device.tap(0.5, 0.5)
+
+
+def test_tap_reports_a_transport_failure(ios4_device: IOSDevice4) -> None:
+    ios4_device._device_ip = "192.0.2.10"
+
+    with patch(
+        "idevice.device.ios4.device.requests.get",
+        side_effect=requests.ConnectionError("connection refused"),
+    ):
+        with pytest.raises(IOSDevice4Error, match="iwda2 request failed"):
+            ios4_device.tap(0.5, 0.5)
 
 
 def test_argument_and_environment_validation() -> None:

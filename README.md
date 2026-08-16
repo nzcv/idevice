@@ -107,21 +107,28 @@ device = IOSDevice4(
     "00000000-0000000000000000",
     device_ip="192.168.1.20",  # enables /api/health readiness polling
 )
-startup_thread = device.run_iwda2(
-    target_bundle_id="com.example.game",
-    log_path="iwda2.log",
-)
+startup_thread = device.run_iwda2(log_path="iwda2.log")
 # Startup and /api/health polling run in the background.
 print(startup_thread.name)
 
 try:
-    # iwda2 is now available at http://192.168.1.20:18201.
-    ...
+    # iwda2 is now available at http://192.168.1.20:18200.
+    device.tap(0.5, 0.5, app_id="com.example.game")  # GET /api/tap
 finally:
     device.stop_iwda2()
 ```
 
-The default Runner bundle ID is `com.idevice.iwda2.xctrunner`. If
+`tap` takes normalized `[0, 1]` coordinates: `(0, 0)` is the top-left corner
+and `(1, 1)` the bottom-right. Pass `app_id` so the offset is anchored to that
+app's frame instead of SpringBoard's portrait-locked one — that is what makes
+taps land correctly in landscape. It needs a reachable
+iwda2 Runner: without `device_ip`, or when the Runner is down, it raises
+`IOSDevice4Error`. Note that `screenshot` still goes through the `ios4`
+screenshot service, whose framebuffer capture is always portrait, so its axes
+only match a tap while the app runs in portrait.
+
+The default Runner bundle ID is `com.idevice.iwda2.xctrunner`, and the Runner
+serves HTTP on its own default port (18200) — the port `tap` dials. If
 `device_ip` is empty, the startup thread verifies that the local XCTest client
 did not exit immediately but skips HTTP readiness polling. Pass
 `wait_ready=False` to skip polling even when an IP is configured. Inspect
@@ -212,6 +219,8 @@ Every platform implementation shares the same interface:
 - `ls(remote, app_id=None, recursive=False)` — list a remote directory on the device
 - `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox, supporting both files and directories (implemented on `IOSDevice3` and `WindowsDevice`; other platforms raise `NotImplementedError`)
 - `swipe(x1, y1, x2, y2, duration_ms=300)` — touch gesture (Android implemented; iOS/Windows raise `NotImplementedError`)
+- `tap(x, y, app_id=None)` — tap a normalized point in `[0, 1]` (currently `IOSDevice4`, via iwda2)
+- `screenshot(local)` — capture the screen to a host file
 - `host_is_running()` — whether WebDriverAgent / UIAutomator2 host process is up
 - `run_iwda2(...)` — launch an iwda2 XCTest Runner (currently `IOSDevice4`)
 - `stop_iwda2(graceful=True, timeout=10)` — stop the active iwda2 XCTest Runner (currently `IOSDevice4`)
@@ -247,6 +256,7 @@ Higher-level UI helpers built on top of device tooling. Currently only `AndroidU
 - Xcode-compatible snapshots via `memgraph`, defaulting to the last launch PID
 - Tracks the returned PID so `memgraph` and the runner cleanup can reuse it
 - Stop via `pkill --bundle`, which kills the app whether or not this instance launched it
+- Screen capture via `screenshot`, and `tap` through the running iwda2 Runner over HTTP
 - Does not currently implement file transfer or Documents-sandbox operations
 
 Choose `Platform.IOS`, `Platform.IOS3`, or `Platform.IOS4` depending on which

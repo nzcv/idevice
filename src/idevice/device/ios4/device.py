@@ -9,10 +9,10 @@ import subprocess
 import tempfile
 import threading
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import IO, NoReturn
+
+import requests
 
 from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.base.errors import AppNotInstalledError, DeviceNotFoundError
@@ -38,7 +38,8 @@ _UDID_PATTERN = re.compile(
 _WDA_PROCESS_MARKERS = ("webdriveragent", "xctrunner", "iwda2-runner")
 _IWDA2_PROCESS_PATTERN = re.compile(r"(?mi)^\s*(\d+)\s+iwda2-runner(?:\s|$)")
 _IWDA2_DEFAULT_RUNNER_BUNDLE_ID = "com.idevice.iwda2.xctrunner"
-_IWDA2_DEFAULT_SERVER_PORT = 18201
+_IWDA2_SERVER_PORT = 18200
+_IWDA2_HTTP_TIMEOUT = 30.0
 
 
 class IOSDevice4Error(RuntimeError):
@@ -56,9 +57,12 @@ class IOSDevice4(DeviceBase):
     * ``application_listing`` for exact bundle-id checks.
     * ``process_control`` for launch environment and ordered arguments.
     * ``xctest`` for launching the preinstalled iwda2 Runner.
+    * ``screenshot`` for screen capture.
     * ``memgraph`` for Xcode-compatible process memory snapshots.
     * ``pkill --bundle`` for stopping an app by bundle id.
     * ``app_service uninstall`` and ``signal`` for lifecycle cleanup.
+
+    :meth:`tap` is served by the running iwda2 Runner over HTTP.
 
     File transfer and Documents-sandbox operations are intentionally not
     implemented because the ios4 backend currently focuses on the game
@@ -83,7 +87,6 @@ class IOSDevice4(DeviceBase):
         self._last_launch_app_id = ""
         self._iwda2_process: subprocess.Popen[str] | None = None
         self._iwda2_log_handle: IO[str] | None = None
-        self._iwda2_server_port: int | None = None
         self._iwda2_startup_thread: threading.Thread | None = None
         self._iwda2_startup_error: Exception | None = None
         self._iwda2_stop_requested = threading.Event()
@@ -318,12 +321,6 @@ class IOSDevice4(DeviceBase):
         self,
         *,
         runner_bundle_id: str = _IWDA2_DEFAULT_RUNNER_BUNDLE_ID,
-        target_bundle_id: str | None = None,
-        server_port: int = _IWDA2_DEFAULT_SERVER_PORT,
-        auto_dismiss_dialogs: bool = True,
-        dialog_scan_interval: float = 0.5,
-        max_session_seconds: float = 3600,
-        command_timeout_seconds: float = 30,
         wait_ready: bool = True,
         ready_timeout: float = 60,
         log_path: Path | str | None = None,
@@ -335,15 +332,11 @@ class IOSDevice4(DeviceBase):
         thread. Use :attr:`iwda2_process_id` to read the host-side client PID and
         :attr:`iwda2_startup_error` to inspect an asynchronous startup failure.
 
+        The Runner serves HTTP on its own default port
+        (``_IWDA2_SERVER_PORT``), which is the port :meth:`tap` dials.
+
         Args:
             runner_bundle_id: Installed iwda2 ``.xctrunner`` bundle identifier.
-            target_bundle_id: Optional target app used for app-owned dialog
-                scans and orientation-aware taps.
-            server_port: iwda2 HTTP port on the device.
-            auto_dismiss_dialogs: Enable the runtime dialog watcher.
-            dialog_scan_interval: Seconds between automatic dialog scans.
-            max_session_seconds: Maximum lifetime of the XCTest session.
-            command_timeout_seconds: iwda2 HTTP command timeout.
             wait_ready: Poll ``/api/health`` on the startup thread when this
                 device has a non-empty :attr:`device_ip`.
             ready_timeout: Maximum number of seconds to wait for readiness.
@@ -359,18 +352,6 @@ class IOSDevice4(DeviceBase):
         """
         if not runner_bundle_id:
             raise ValueError("runner_bundle_id must be a non-empty string")
-        if target_bundle_id is not None and not target_bundle_id:
-            raise ValueError("target_bundle_id must be non-empty when provided")
-        if not isinstance(auto_dismiss_dialogs, bool):
-            raise ValueError("auto_dismiss_dialogs must be a bool")
-        self._validate_port(server_port)
-        self._validate_positive_number(
-            dialog_scan_interval, "dialog_scan_interval"
-        )
-        self._validate_positive_number(max_session_seconds, "max_session_seconds")
-        self._validate_positive_number(
-            command_timeout_seconds, "command_timeout_seconds"
-        )
         self._validate_positive_number(ready_timeout, "ready_timeout")
 
         active_process = self._iwda2_process
@@ -387,24 +368,7 @@ class IOSDevice4(DeviceBase):
         if not self.is_installed(runner_bundle_id):
             raise AppNotInstalledError(f"iwda2 Runner not installed: {runner_bundle_id}")
 
-        environment = {
-            "SERVER_PORT": str(server_port),
-            "AUTO_DISMISS_DIALOGS": str(auto_dismiss_dialogs).lower(),
-            "DIALOG_SCAN_INTERVAL": self._format_number(dialog_scan_interval),
-            "MAX_SESSION_SECONDS": self._format_number(max_session_seconds),
-            "COMMAND_TIMEOUT_SECONDS": self._format_number(
-                command_timeout_seconds
-            ),
-        }
-        if target_bundle_id:
-            environment["TARGET_BUNDLE_ID"] = target_bundle_id
-
-        command = self._command(
-            "xctest", "--env", self._encode_environment(environment)
-        )
-        command.append(runner_bundle_id)
-        if target_bundle_id:
-            command.append(target_bundle_id)
+        command = self._command("xctest", runner_bundle_id)
 
         log_handle: IO[str] | None = None
         output: int | IO[str] = subprocess.DEVNULL
@@ -417,7 +381,6 @@ class IOSDevice4(DeviceBase):
             output = log_handle
 
         self._iwda2_log_handle = log_handle
-        self._iwda2_server_port = server_port
         self._iwda2_startup_error = None
         self._iwda2_stop_requested.clear()
         startup_thread = threading.Thread(
@@ -425,7 +388,6 @@ class IOSDevice4(DeviceBase):
             kwargs={
                 "command": command,
                 "output": output,
-                "server_port": server_port,
                 "wait_ready": wait_ready,
                 "ready_timeout": ready_timeout,
             },
@@ -441,7 +403,6 @@ class IOSDevice4(DeviceBase):
         *,
         command: list[str],
         output: int | IO[str],
-        server_port: int,
         wait_ready: bool,
         ready_timeout: float,
     ) -> None:
@@ -462,7 +423,6 @@ class IOSDevice4(DeviceBase):
                 return
             self._wait_for_iwda2_startup(
                 process,
-                server_port=server_port,
                 wait_ready=wait_ready,
                 timeout=ready_timeout,
             )
@@ -522,13 +482,6 @@ class IOSDevice4(DeviceBase):
             raise ValueError(f"{name} must be a positive number")
 
     @staticmethod
-    def _validate_port(port: int) -> None:
-        if isinstance(port, bool) or not isinstance(port, int):
-            raise ValueError("server_port must be an integer between 1 and 65535")
-        if not 1 <= port <= 65535:
-            raise ValueError("server_port must be an integer between 1 and 65535")
-
-    @staticmethod
     def _format_number(value: float) -> str:
         numeric = float(value)
         return str(int(numeric)) if numeric.is_integer() else str(numeric)
@@ -537,7 +490,6 @@ class IOSDevice4(DeviceBase):
         self,
         process: subprocess.Popen[str],
         *,
-        server_port: int,
         wait_ready: bool,
         timeout: float,
     ) -> None:
@@ -553,7 +505,7 @@ class IOSDevice4(DeviceBase):
             return
 
         deadline = time.monotonic() + timeout
-        url = f"http://{self.device_ip}:{server_port}/api/health"
+        url = self._iwda2_url("/api/health")
         last_error = "service did not respond"
         while time.monotonic() < deadline:
             returncode = process.poll()
@@ -563,11 +515,11 @@ class IOSDevice4(DeviceBase):
                     f"with code {returncode}"
                 )
             try:
-                with urllib.request.urlopen(url, timeout=1) as response:
-                    if response.status == 200:
-                        return
-                    last_error = f"HTTP {response.status}"
-            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                response = requests.get(url, timeout=1)
+                if response.status_code == 200:
+                    return
+                last_error = f"HTTP {response.status_code}"
+            except requests.RequestException as exc:
                 last_error = str(exc)
             time.sleep(0.25)
         raise IOSDevice4Error(
@@ -575,19 +527,54 @@ class IOSDevice4(DeviceBase):
             f"{self._format_number(timeout)}s: {last_error}"
         )
 
-    def _request_iwda2_exit(self, *, timeout: float) -> bool:
-        port = self._iwda2_server_port or _IWDA2_DEFAULT_SERVER_PORT
-        url = f"http://{self.device_ip}:{port}/api/exit"
+    def _iwda2_url(self, route: str) -> str:
+        """Build an iwda2 device URL for ``route`` on the active server port."""
+        if not self.device_ip:
+            raise IOSDevice4Error(
+                f"{_LOG_TAG} device_ip is required to reach iwda2 on "
+                f"{self.device_id}"
+            )
+        return f"http://{self.device_ip}:{_IWDA2_SERVER_PORT}{route}"
+
+    def _iwda2_get(
+        self,
+        route: str,
+        *,
+        params: dict[str, str] | None = None,
+        timeout: float = _IWDA2_HTTP_TIMEOUT,
+    ) -> bytes:
+        """GET an iwda2 route and return the raw response body.
+
+        Raises:
+            IOSDevice4Error: If ``device_ip`` is empty, the request fails, or
+                the runner does not answer with ``200``.
+        """
+        url = self._iwda2_url(route)
+        logger.debug(f"{_LOG_TAG} GET {url} params={params}")
         try:
-            with urllib.request.urlopen(url, timeout=timeout):
-                return True
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            response = requests.get(url, params=params, timeout=timeout)
+        except requests.RequestException as exc:
+            raise IOSDevice4Error(
+                f"{_LOG_TAG} iwda2 request failed: GET {url}: {exc}"
+            ) from exc
+        if response.status_code != 200:
+            raise IOSDevice4Error(
+                f"{_LOG_TAG} GET {url} returned HTTP {response.status_code}: "
+                f"{response.text!r}"
+            )
+        return response.content
+
+    def _request_iwda2_exit(self, *, timeout: float) -> bool:
+        url = self._iwda2_url("/api/exit")
+        try:
+            requests.get(url, timeout=timeout)
+        except requests.RequestException as exc:
             logger.warning(f"{_LOG_TAG} Could not request iwda2 exit: {exc}")
             return False
+        return True
 
     def _clear_iwda2_process(self) -> None:
         self._iwda2_process = None
-        self._iwda2_server_port = None
         if self._iwda2_log_handle is not None:
             self._iwda2_log_handle.close()
             self._iwda2_log_handle = None
@@ -735,6 +722,48 @@ class IOSDevice4(DeviceBase):
             self._command("screenshot", str(local_path)), check=False
         )
         return result.returncode == 0 and local_path.exists()
+
+    def tap(self, x: float, y: float, *, app_id: str | None = None) -> None:
+        """Tap a normalized screen point through iwda2 (``GET /api/tap``).
+
+        Coordinates are fractions of the screen rather than pixels, so they are
+        independent of resolution and point scale: ``(0, 0)`` is the top-left
+        corner and ``(1, 1)`` the bottom-right. To tap a feature located in an
+        image, divide its pixel position by the image width and height. Note
+        that :meth:`screenshot` captures the portrait framebuffer through the
+        ios4 screenshot service, so its axes only match a tap while the app
+        itself runs in portrait.
+
+        Args:
+            x: Horizontal position in ``[0, 1]``.
+            y: Vertical position in ``[0, 1]``.
+            app_id: Foreground bundle id the offset is anchored to. When
+                omitted, iwda2 measures the offset against SpringBoard's
+                portrait-locked frame, which lands at the wrong physical point
+                for a landscape app.
+
+        Raises:
+            ValueError: If ``x`` or ``y`` is not a number in ``[0, 1]``.
+            IOSDevice4Error: If :attr:`device_ip` is empty or iwda2 does not
+                accept the tap.
+        """
+        self._validate_normalized_coordinate(x, "x")
+        self._validate_normalized_coordinate(y, "y")
+        params = {"x": self._format_number(x), "y": self._format_number(y)}
+        if app_id:
+            params["bundleId"] = app_id
+        logger.info(
+            f"{_LOG_TAG} Tapping ({params['x']}, {params['y']}) on "
+            f"{self.device_id}"
+        )
+        self._iwda2_get("/api/tap", params=params)
+
+    @staticmethod
+    def _validate_normalized_coordinate(value: float, name: str) -> None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{name} must be a normalized coordinate in [0, 1]")
+        if not 0.0 <= value <= 1.0:
+            raise ValueError(f"{name} must be a normalized coordinate in [0, 1]")
 
     def _unsupported(self, operation: str) -> NoReturn:
         raise NotImplementedError(

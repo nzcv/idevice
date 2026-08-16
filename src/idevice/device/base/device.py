@@ -235,6 +235,25 @@ class DeviceBase(ABC):
         """
         raise NotImplementedError
 
+    def tap(self, x: float, y: float, *, app_id: str | None = None) -> None:
+        """Tap a normalized point on the bound device's screen.
+
+        Coordinates are fractions of the screen rather than pixels: ``(0, 0)``
+        is the top-left corner and ``(1, 1)`` the bottom-right.
+
+        Args:
+            x: Horizontal position in ``[0, 1]``.
+            y: Vertical position in ``[0, 1]``.
+            app_id: Foreground app id the offset is anchored to, where the
+                platform supports it.
+
+        Raises:
+            ValueError: If ``x`` or ``y`` is outside ``[0, 1]``.
+            NotImplementedError: On platforms without tap support.
+        """
+        del x, y, app_id
+        raise NotImplementedError(f"tap is not supported on {self.platform} devices")
+
     @abstractmethod
     def swipe(
         self,
@@ -273,12 +292,6 @@ class DeviceBase(ABC):
         self,
         *,
         runner_bundle_id: str = "com.idevice.iwda2.xctrunner",
-        target_bundle_id: str | None = None,
-        server_port: int = 18201,
-        auto_dismiss_dialogs: bool = True,
-        dialog_scan_interval: float = 0.5,
-        max_session_seconds: float = 3600,
-        command_timeout_seconds: float = 30,
         wait_ready: bool = True,
         ready_timeout: float = 60,
         log_path: Path | str | None = None,
@@ -287,12 +300,6 @@ class DeviceBase(ABC):
 
         Args:
             runner_bundle_id: Installed iwda2 ``.xctrunner`` bundle identifier.
-            target_bundle_id: Optional app bundle identifier used by iwda2.
-            server_port: HTTP port exposed by iwda2 on the device.
-            auto_dismiss_dialogs: Whether iwda2 should dismiss system dialogs.
-            dialog_scan_interval: Seconds between automatic dialog scans.
-            max_session_seconds: Maximum XCTest session lifetime in seconds.
-            command_timeout_seconds: iwda2 HTTP command timeout in seconds.
             wait_ready: Whether to wait for the iwda2 health endpoint.
             ready_timeout: Maximum readiness wait in seconds.
             log_path: Optional host path for XCTest client output.
@@ -306,12 +313,6 @@ class DeviceBase(ABC):
         """
         del (
             runner_bundle_id,
-            target_bundle_id,
-            server_port,
-            auto_dismiss_dialogs,
-            dialog_scan_interval,
-            max_session_seconds,
-            command_timeout_seconds,
             wait_ready,
             ready_timeout,
             log_path,
