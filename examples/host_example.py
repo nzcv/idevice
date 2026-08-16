@@ -16,22 +16,22 @@ Prerequisites:
 Examples:
     # Build from the GAUTO_* environment and capture a memgraph
     uv run python examples/host_example.py --from-env \\
-        --bundle-id com.rm42.TrashDash
+        --bundle-id com.example.game
 
     # Build explicitly and drive each step (launch app -> capture -> kill)
     uv run python examples/host_example.py \\
         --keeper-ip 127.0.0.1 \\
         --device-udid 00000000-0000000000000000 \\
         --device-ip 127.0.0.1 \\
-        --bundle-id com.rm42.TrashDash --steps
+        --bundle-id com.example.game --steps
 
     # Capture and export the memgraphs (keeper presigns + uploads)
     uv run python examples/host_example.py --from-env \\
-        --bundle-id com.rm42.TrashDash --export
+        --bundle-id com.example.game --export
 
     # Override engine BootConfig values via argv (argv beats boot.config)
     uv run python examples/host_example.py --from-env \\
-        --bundle-id com.rm42.TrashDash \\
+        --bundle-id com.example.game \\
         --launch-args="-hg-mmap-allocater 0 -hg-mmap-allocater-v2 false"
 
     # Health probe only (keeper reachability), verbose logging
@@ -49,7 +49,7 @@ from idevice.host import Host, HostBase, HostError, HostTimeoutError, config
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BUNDLE_ID = "com.rm42.TrashDash"
+DEFAULT_BUNDLE_ID = "com.example.game"
 DEFAULT_CAPTURE_TIMEOUT_S = 60.0
 
 

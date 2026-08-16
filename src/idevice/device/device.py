@@ -23,8 +23,8 @@ class Platform(Enum):
     """Supported device platforms."""
 
     IOS = "_ios"
-    IOS3 = "ios3"
-    IOS4 = "ios"
+    IOS3 = "ios"
+    IOS4 = "ios4"
     ANDROID = "android"
     WINDOWS = "pc"
 

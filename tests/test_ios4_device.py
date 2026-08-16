@@ -13,10 +13,10 @@ from idevice.device.base.errors import AppNotInstalledError, DeviceNotFoundError
 from idevice.device.base.runner import CommandResult
 from idevice.device.ios4.device import IOSDevice4, IOSDevice4Error
 
-APP_ID = "com.kidfun.TrashDash"
+APP_ID = "com.example.game"
 IWDA2_RUNNER_ID = "com.idevice.iwda2.xctrunner"
 BINARY = "/opt/ios4"
-UDID = "00008030-000511423E84802E"
+UDID = "00000000-0000000000000000"
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ def result(
 def test_install_uses_ideviceinstaller_and_caches_app(
     ios4_device: IOSDevice4, tmp_path: Path
 ) -> None:
-    ipa = tmp_path / "TrashDash.ipa"
+    ipa = tmp_path / "ExampleGame.ipa"
     ipa.write_bytes(b"ipa")
     ios4_device._runner.run.return_value = result(stdout="install success\n")
 
@@ -70,7 +70,7 @@ def test_install_uses_ideviceinstaller_and_caches_app(
 def test_install_detects_cli_error_even_with_zero_exit(
     ios4_device: IOSDevice4, tmp_path: Path
 ) -> None:
-    ipa = tmp_path / "TrashDash.ipa"
+    ipa = tmp_path / "ExampleGame.ipa"
     ipa.write_bytes(b"ipa")
     ios4_device._runner.run.return_value = result(
         stderr="Install failed: invalid package\n"
@@ -90,13 +90,13 @@ def test_install_rejects_missing_package(
 def test_application_listing_matches_exact_bundle_id() -> None:
     output = """
 Found 2 applications:
-  com.kidfun.TrashDash        TrashDash       1.0
-  com.kidfun.TrashDash.beta   TrashDash Beta  1.0
+  com.example.game        ExampleGame       1.0
+  com.example.game.beta   ExampleGame Beta  1.0
 """
     assert IOSDevice4._bundle_id_in_application_listing(output, APP_ID) is True
     assert (
         IOSDevice4._bundle_id_in_application_listing(
-            output, "com.kidfun.Trash"
+            output, "com.example.other"
         )
         is False
     )
@@ -106,7 +106,7 @@ def test_launch_passes_environment_and_ordered_arguments(
     ios4_device: IOSDevice4,
 ) -> None:
     ios4_device._runner.run.side_effect = [
-        result(stdout=f"  {APP_ID}  TrashDash  1.0\n"),
+        result(stdout=f"  {APP_ID}  ExampleGame  1.0\n"),
         result(stdout="PID: 4815\n"),
     ]
 
@@ -151,7 +151,7 @@ def test_launch_requires_pid_in_process_control_output(
     ios4_device: IOSDevice4,
 ) -> None:
     ios4_device._runner.run.side_effect = [
-        result(stdout=f"  {APP_ID}  TrashDash  1.0\n"),
+        result(stdout=f"  {APP_ID}  ExampleGame  1.0\n"),
         result(stdout="launch completed without pid\n"),
     ]
 

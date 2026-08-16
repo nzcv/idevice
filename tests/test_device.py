@@ -38,14 +38,14 @@ def test_create_ios4_backend(monkeypatch: pytest.MonkeyPatch) -> None:
 
     device = Device.create(
         "ios4",
-        device_id="00008030-000511423E84802E",
+        device_id="00000000-0000000000000000",
         device_ip="",
-        package_name="com.kidfun.TrashDash",
+        package_name="com.example.game",
     )
 
     assert isinstance(device, IOSDevice4)
     assert device.platform == "ios4"
-    assert device.package_name == "com.kidfun.TrashDash"
+    assert device.package_name == "com.example.game"
     Device.reset()
 
 

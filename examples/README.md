@@ -8,7 +8,7 @@ Install a package on a connected device and verify it with `pm list packages`:
 uv run python examples/android_device_install.py \
   --serial "$(adb devices | awk 'NR>2 && $2=="device" {print $1; exit}')" \
   --apk tests/apk/app.apk \
-  --package com.Unity.TrashDash
+  --package com.example.game
 ```
 
 Optional: dismiss OEM post-install dialogs after install:
@@ -17,7 +17,7 @@ Optional: dismiss OEM post-install dialogs after install:
 uv run python examples/android_device_install.py \
   --serial emulator-5554 \
   --apk tests/apk/app.apk \
-  --package com.Unity.TrashDash \
+  --package com.example.game \
   --dismiss-dialogs
 ```
 
@@ -29,8 +29,8 @@ from pathlib import Path
 from idevice.device.android.device import AndroidDevice
 
 device = AndroidDevice("emulator-5554")
-device.install(Path("tests/apk/app.apk"), app_id="com.Unity.TrashDash")
-assert device.is_installed("com.Unity.TrashDash")
+device.install(Path("tests/apk/app.apk"), app_id="com.example.game")
+assert device.is_installed("com.example.game")
 ```
 
 ## iOS4: install and launch through ios4
@@ -39,10 +39,10 @@ assert device.is_installed("com.Unity.TrashDash")
 IDEVICE_IOS4_BINARY=/path/to/ios4 \
 uv run python examples/ios4_device.py \
   --udid 00000000-0000000000000000 \
-  --ipa path/to/TrashDash.ipa \
-  --app-id com.kidfun.TrashDash \
+  --ipa path/to/ExampleGame.ipa \
+  --app-id com.example.game \
   --malloc-stack-logging \
-  --memgraph trash-dash.memgraph \
+  --memgraph example-game.memgraph \
   --arg=--mode --arg=debug
 ```
 
@@ -56,7 +56,7 @@ The IOS4 backend can also keep the preinstalled iwda2 XCTest Runner alive:
 from idevice.device.ios4.device import IOSDevice4
 
 device = IOSDevice4("<udid>", device_ip="<device-ip>")
-device.run_iwda2(target_bundle_id="com.kidfun.TrashDash")
+device.run_iwda2(target_bundle_id="com.example.game")
 try:
     # screenshot/tap HTTP requests use <device-ip>:18201
     ...

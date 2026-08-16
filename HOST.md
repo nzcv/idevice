@@ -95,7 +95,7 @@ host = Host.create(
     keeper_ip="127.0.0.1",
     device_udid="00000000-0000000000000000",
     device_ip="127.0.0.1",
-    bundle_id="com.rm42.TrashDash",
+    bundle_id="com.example.game",
 )
 
 host.launch_app()                   # GET /api/runs/{udid}/launch: run + app in one call
