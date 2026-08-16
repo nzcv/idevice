@@ -471,9 +471,12 @@ def test_capture_memgraph_failure_preserves_existing_output(
     assert output.read_bytes() == b"previous"
 
 
-def test_stop_signals_last_launched_pid(ios4_device: IOSDevice4) -> None:
+def test_stop_pkills_the_bundle_and_clears_the_tracked_pid(
+    ios4_device: IOSDevice4,
+) -> None:
     ios4_device._last_launch_pid = 4815
     ios4_device._last_launch_app_id = APP_ID
+    ios4_device._runner.run.return_value = result(stdout="Killed 4815 (Game)\n")
 
     ios4_device.stop_app()
 
@@ -482,13 +485,36 @@ def test_stop_signals_last_launched_pid(ios4_device: IOSDevice4) -> None:
             BINARY,
             "--udid",
             UDID,
-            "app_service",
-            "signal",
-            "4815",
-            "9",
-        ]
+            "pkill",
+            "--bundle",
+            APP_ID,
+        ],
+        check=False,
     )
     assert ios4_device.last_launch_pid is None
+
+
+def test_stop_keeps_the_tracked_pid_of_another_app(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._last_launch_pid = 4815
+    ios4_device._last_launch_app_id = APP_ID
+    ios4_device._runner.run.return_value = result(
+        stdout="No running process matches com.example.other\n"
+    )
+
+    ios4_device.stop_app("com.example.other")
+
+    assert ios4_device.last_launch_pid == 4815
+
+
+def test_stop_raises_when_pkill_fails(ios4_device: IOSDevice4) -> None:
+    ios4_device._runner.run.return_value = result(
+        returncode=1, stderr="No installed application with bundle ID\n"
+    )
+
+    with pytest.raises(IOSDevice4Error, match="Failed to stop"):
+        ios4_device.stop_app()
 
 
 def test_argument_and_environment_validation() -> None:

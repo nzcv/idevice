@@ -57,6 +57,7 @@ class IOSDevice4(DeviceBase):
     * ``process_control`` for launch environment and ordered arguments.
     * ``xctest`` for launching the preinstalled iwda2 Runner.
     * ``memgraph`` for Xcode-compatible process memory snapshots.
+    * ``pkill --bundle`` for stopping an app by bundle id.
     * ``app_service uninstall`` and ``signal`` for lifecycle cleanup.
 
     File transfer and Documents-sandbox operations are intentionally not
@@ -689,17 +690,26 @@ class IOSDevice4(DeviceBase):
             temporary_path.unlink(missing_ok=True)
 
     def stop_app(self, app_id: str | None = None) -> None:
-        """Signal the process most recently launched by this instance."""
+        """Kill every process of the app, whoever launched it.
+
+        Raises:
+            IOSDevice4Error: If ``ios4 pkill`` fails, which includes the app
+                not being installed. A stopped app is not an error.
+        """
         target = self._resolve_app_id(app_id)
-        if self._last_launch_pid is None or self._last_launch_app_id != target:
-            raise IOSDevice4Error(
-                f"{_LOG_TAG} No tracked PID for {target}; launch it with this instance first"
-            )
-        self._runner.run(
-            self._command("app_service", "signal", str(self._last_launch_pid), "9")
+        logger.info(f"{_LOG_TAG} Stopping app on iOS device {self.device_id}: {target}")
+        result = self._runner.run(
+            self._command("pkill", "--bundle", target), check=False
         )
-        self._last_launch_pid = None
-        self._last_launch_app_id = ""
+        if result.returncode != 0:
+            raise IOSDevice4Error(
+                f"{_LOG_TAG} Failed to stop {target} on {self.device_id}: "
+                f"returncode={result.returncode}, stdout={result.stdout!r}, "
+                f"stderr={result.stderr!r}"
+            )
+        if self._last_launch_app_id == target:
+            self._last_launch_pid = None
+            self._last_launch_app_id = ""
 
     def get_installed_pkg_name(self, app_id: str) -> InstalledAppInfo | None:
         """Return cached package information when the app is still installed."""

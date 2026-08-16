@@ -245,7 +245,8 @@ Higher-level UI helpers built on top of device tooling. Currently only `AndroidU
 - Exact bundle-id checks via `application_listing`
 - Launch via `process_control`, including ordered `argv` and environment values
 - Xcode-compatible snapshots via `memgraph`, defaulting to the last launch PID
-- Tracks the returned PID so the same instance can stop the launched process
+- Tracks the returned PID so `memgraph` and the runner cleanup can reuse it
+- Stop via `pkill --bundle`, which kills the app whether or not this instance launched it
 - Does not currently implement file transfer or Documents-sandbox operations
 
 Choose `Platform.IOS`, `Platform.IOS3`, or `Platform.IOS4` depending on which
