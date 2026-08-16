@@ -16,6 +16,7 @@ from idevice.device.ios4.device import IOSDevice4, IOSDevice4Error
 APP_ID = "com.example.game"
 IWDA2_RUNNER_ID = "com.idevice.iwda2.xctrunner"
 BINARY = "/opt/ios4"
+IDEVICEINSTALLER = "/opt/bin/ideviceinstaller"
 UDID = "00000000-0000000000000000"
 
 
@@ -43,14 +44,36 @@ def result(
     return CommandResult(returncode=returncode, stdout=stdout, stderr=stderr)
 
 
-def test_install_uses_ideviceinstaller_and_caches_app(
+def test_install_prefers_standalone_ideviceinstaller(
+    ios4_device: IOSDevice4, tmp_path: Path
+) -> None:
+    ipa = tmp_path / "ExampleGame.ipa"
+    ipa.write_bytes(b"ipa")
+    ios4_device._runner.run.return_value = result(stdout="Install: Complete\n")
+
+    with patch(
+        "idevice.device.ios4.device.shutil.which",
+        return_value=IDEVICEINSTALLER,
+    ):
+        assert ios4_device.install(ipa, app_id=APP_ID) is True
+
+    ios4_device._runner.run.assert_called_once_with(
+        [IDEVICEINSTALLER, "--udid", UDID, "install", str(ipa)],
+        check=False,
+        timeout=3600,
+    )
+    assert ios4_device._app_cache.get(APP_ID) is not None
+
+
+def test_install_falls_back_to_ios4_when_ideviceinstaller_missing(
     ios4_device: IOSDevice4, tmp_path: Path
 ) -> None:
     ipa = tmp_path / "ExampleGame.ipa"
     ipa.write_bytes(b"ipa")
     ios4_device._runner.run.return_value = result(stdout="install success\n")
 
-    assert ios4_device.install(ipa, app_id=APP_ID) is True
+    with patch("idevice.device.ios4.device.shutil.which", return_value=None):
+        assert ios4_device.install(ipa, app_id=APP_ID) is True
 
     ios4_device._runner.run.assert_called_once_with(
         [

@@ -20,13 +20,17 @@ from idevice.device.base.runner import SubprocessRunner
 from idevice.device.cache import InstalledAppCache, InstalledAppInfo
 from idevice.device.config import device_id as env_device_id
 from idevice.device.config import device_ip as env_device_ip
-from idevice.device.config import ios4_binary
+from idevice.device.config import ideviceinstaller_binary, ios4_binary
 from idevice.device.config import package_name as env_package_name
 
 logger = logging.getLogger(__name__)
 
 _LOG_TAG = "[IOSDevice4]"
-_INSTALL_SUCCESS_MARKER = "install success"
+_INSTALL_SUCCESS_MARKERS = (
+    "install success",
+    "install: complete",
+    "install - complete",
+)
 _PID_PATTERN = re.compile(r"(?m)^PID:\s*(\d+)\s*$")
 _UDID_PATTERN = re.compile(
     r'UniqueDeviceID["\']?\s*:\s*String\(\s*"([^"\\]+)"\s*\)'
@@ -44,9 +48,11 @@ class IOSDevice4Error(RuntimeError):
 class IOSDevice4(DeviceBase):
     """Install and launch iOS games through ``ios4``.
 
-    The backend uses these ``ios4`` subcommands:
+    IPA installation prefers the standalone libimobiledevice
+    ``ideviceinstaller`` CLI and falls back to ``ios4 ideviceinstaller install``
+    when that binary is not on the host. Every other operation uses these
+    ``ios4`` subcommands:
 
-    * ``ideviceinstaller install`` for IPA installation.
     * ``application_listing`` for exact bundle-id checks.
     * ``process_control`` for launch environment and ordered arguments.
     * ``xctest`` for launching the preinstalled iwda2 Runner.
@@ -81,7 +87,7 @@ class IOSDevice4(DeviceBase):
         self._iwda2_startup_error: Exception | None = None
         self._iwda2_stop_requested = threading.Event()
 
-        if shutil.which(self._binary) is None and not Path(self._binary).is_file():
+        if self._resolve_binary(self._binary) is None:
             logger.error(f"{_LOG_TAG} `{self._binary}` CLI not found")
             raise IOSDevice4Error(
                 f"`{self._binary}` CLI not found. Build or install the "
@@ -135,6 +141,31 @@ class IOSDevice4(DeviceBase):
         return [self._binary, "--udid", self.device_id, *arguments]
 
     @staticmethod
+    def _resolve_binary(binary: str) -> str | None:
+        """Return the usable path for ``binary``, or ``None`` when missing."""
+        resolved = shutil.which(binary)
+        if resolved is not None:
+            return resolved
+        return binary if Path(binary).is_file() else None
+
+    def _install_command(self, package_path: Path) -> list[str]:
+        """Build the install command, preferring standalone ``ideviceinstaller``."""
+        standalone = self._resolve_binary(ideviceinstaller_binary())
+        if standalone is not None:
+            return [
+                standalone,
+                "--udid",
+                self.device_id,
+                "install",
+                str(package_path),
+            ]
+        logger.debug(
+            f"{_LOG_TAG} standalone ideviceinstaller not found; using the "
+            "ios4 ideviceinstaller subcommand"
+        )
+        return self._command("ideviceinstaller", "install", str(package_path))
+
+    @staticmethod
     def _bundle_id_in_application_listing(output: str, app_id: str) -> bool:
         """Return whether an application-listing row starts with ``app_id``."""
         for line in output.splitlines():
@@ -174,22 +205,36 @@ class IOSDevice4(DeviceBase):
         return ",".join(encoded)
 
     def install(self, package_path: Path, app_id: str | None = None) -> bool:
-        """Install an IPA or app directory with ``ideviceinstaller install``."""
+        """Install an IPA or app directory with ``ideviceinstaller install``.
+
+        The standalone libimobiledevice ``ideviceinstaller`` CLI is used when it
+        is available on the host (or pointed at by
+        ``IDEVICE_IDEVICEINSTALLER_BINARY``); otherwise the installation falls
+        back to the ``ios4 ideviceinstaller`` subcommand.
+
+        Args:
+            package_path: IPA file or app directory to install.
+            app_id: Bundle identifier cached after a successful install.
+
+        Returns:
+            bool: Whether the installation reported success.
+
+        Raises:
+            FileNotFoundError: If ``package_path`` does not exist.
+        """
         package_path = Path(package_path)
         if not package_path.exists():
             raise FileNotFoundError(f"Package not found: {package_path}")
 
+        command = self._install_command(package_path)
         logger.info(
-            f"{_LOG_TAG} Installing package on {self.device_id}: {package_path}"
+            f"{_LOG_TAG} Installing package on {self.device_id} via "
+            f"{command[0]}: {package_path}"
         )
-        result = self._runner.run(
-            self._command("ideviceinstaller", "install", str(package_path)),
-            check=False,
-            timeout=3600,
-        )
+        result = self._runner.run(command, check=False, timeout=3600)
         combined_output = f"{result.stdout}\n{result.stderr}".lower()
-        succeeded = (
-            result.returncode == 0 and _INSTALL_SUCCESS_MARKER in combined_output
+        succeeded = result.returncode == 0 and any(
+            marker in combined_output for marker in _INSTALL_SUCCESS_MARKERS
         )
         if not succeeded:
             logger.error(

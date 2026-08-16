@@ -29,6 +29,14 @@ def ios4_binary() -> str:
     return os.environ.get("IDEVICE_IOS4_BINARY", default)
 
 
+def ideviceinstaller_binary() -> str:
+    """Return the standalone libimobiledevice ``ideviceinstaller`` CLI path."""
+    default = (
+        "ideviceinstaller.exe" if sys.platform == "win32" else "ideviceinstaller"
+    )
+    return os.environ.get("IDEVICE_IDEVICEINSTALLER_BINARY", default)
+
+
 def adb_binary() -> str:
     """Return the adb CLI binary path."""
     return os.environ.get("IDEVICE_ADB_BINARY", "adb")
