@@ -76,7 +76,7 @@ class DummyDevice(DeviceBase):
         self._noop("is_installed")
         return False
 
-    def launch_app(self, app_id: str) -> None:
+    def launch_app(self, app_id: str | None = None) -> None:
         del app_id
         self._noop("launch_app")
 
@@ -148,14 +148,14 @@ class DummyDevice(DeviceBase):
         del graceful, timeout
         self._noop("stop_iwda2")
 
-    def xmemory_shot(
+    def capture_memgraph(
         self,
         output: Path | str,
         *,
         pid: int | None = None,
     ) -> Path:
         del pid
-        self._noop("xmemory_shot")
+        self._noop("capture_memgraph")
         return Path(output).expanduser().resolve()
 
     def push(

@@ -192,14 +192,15 @@ class DeviceBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def launch_app(self, app_id: str) -> None:
+    def launch_app(self, app_id: str | None = None) -> None:
         """Launch an installed app on the bound device.
 
         Args:
-            app_id: ID of the app to launch (bundle id / package name).
+            app_id: ID of the app to launch (bundle id / package name). When
+                omitted or empty, uses the bound :attr:`package_name`.
 
         Raises:
-            ValueError: If ``app_id`` is empty.
+            ValueError: If both ``app_id`` and :attr:`package_name` are empty.
         """
         raise NotImplementedError
 
@@ -340,7 +341,7 @@ class DeviceBase(ABC):
             f"stop_iwda2 is not supported on {self.platform} devices"
         )
 
-    def xmemory_shot(
+    def capture_memgraph(
         self,
         output: Path | str,
         *,
@@ -361,7 +362,7 @@ class DeviceBase(ABC):
         """
         del output, pid
         raise NotImplementedError(
-            f"xmemory_shot is not supported on {self.platform} devices"
+            f"capture_memgraph is not supported on {self.platform} devices"
         )
 
     @abstractmethod

@@ -273,7 +273,7 @@ class IOSDevice4(DeviceBase):
 
     def launch_app(
         self,
-        app_id: str,
+        app_id: str | None = None,
         *,
         args: list[str] | None = None,
         environment: dict[str, str] | None = None,
@@ -281,36 +281,37 @@ class IOSDevice4(DeviceBase):
         """Launch an installed game with optional environment and ``argv``.
 
         Args:
-            app_id: Bundle identifier to launch.
+            app_id: Bundle identifier to launch. When omitted or empty, uses
+                the bound :attr:`package_name`.
             args: Ordered command-line arguments passed to the game process.
             environment: Environment variables injected before process start.
 
         Raises:
-            AppNotInstalledError: If ``app_id`` is not installed.
+            ValueError: If both ``app_id`` and :attr:`package_name` are empty.
+            AppNotInstalledError: If the resolved bundle id is not installed.
             IOSDevice4Error: If process control does not return a PID.
         """
-        if not app_id:
-            raise ValueError("app_id is required and must be a non-empty string")
-        if not self.is_installed(app_id):
-            raise AppNotInstalledError(f"App not installed: {app_id}")
+        target = self._resolve_app_id(app_id)
+        if not self.is_installed(target):
+            raise AppNotInstalledError(f"App not installed: {target}")
 
         command = self._command("process_control")
         if environment:
             command.extend(["--env", self._encode_environment(environment)])
         if args:
             command.extend(["--args", self._encode_launch_arguments(args)])
-        command.append(app_id)
+        command.append(target)
 
-        logger.info(f"{_LOG_TAG} Launching {app_id} on {self.device_id}")
+        logger.info(f"{_LOG_TAG} Launching {target} on {self.device_id}")
         result = self._runner.run(command)
         match = _PID_PATTERN.search(f"{result.stdout}\n{result.stderr}")
         if match is None:
             raise IOSDevice4Error(
-                f"{_LOG_TAG} process_control did not return a PID for {app_id}: "
+                f"{_LOG_TAG} process_control did not return a PID for {target}: "
                 f"stdout={result.stdout!r}, stderr={result.stderr!r}"
             )
         self._last_launch_pid = int(match.group(1))
-        self._last_launch_app_id = app_id
+        self._last_launch_app_id = target
 
     def run_iwda2(
         self,
@@ -620,7 +621,7 @@ class IOSDevice4(DeviceBase):
                 check=False,
             )
 
-    def xmemory_shot(
+    def capture_memgraph(
         self,
         output: Path | str,
         *,
@@ -686,15 +687,6 @@ class IOSDevice4(DeviceBase):
             return output_path
         finally:
             temporary_path.unlink(missing_ok=True)
-
-    def capture_memgraph(
-        self,
-        output: Path | str,
-        *,
-        pid: int | None = None,
-    ) -> Path:
-        """Compatibility alias for :meth:`xmemory_shot`."""
-        return self.xmemory_shot(output, pid=pid)
 
     def stop_app(self, app_id: str | None = None) -> None:
         """Signal the process most recently launched by this instance."""

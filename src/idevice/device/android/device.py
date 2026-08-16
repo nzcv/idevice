@@ -136,19 +136,18 @@ class AndroidDevice(DeviceBase):
         logger.debug(f"App {app_id} installed on Android device {self.device_id}: {installed}")
         return installed
 
-    def launch_app(self, app_id: str) -> None:
-        if not app_id:
-            raise ValueError("app_id is required and must be a non-empty string")
-        if not self.is_installed(app_id):
-            raise AppNotInstalledError(f"App not installed: {app_id}")
-        logger.info(f"[AndroidDevice] Launching {app_id} on {self.device_id}")
+    def launch_app(self, app_id: str | None = None) -> None:
+        target = self._resolve_app_id(app_id)
+        if not self.is_installed(target):
+            raise AppNotInstalledError(f"App not installed: {target}")
+        logger.info(f"[AndroidDevice] Launching {target} on {self.device_id}")
         command = self._base_command()
         command.extend(
             [
                 "shell",
                 "monkey",
                 "-p",
-                app_id,
+                target,
                 "-c",
                 "android.intent.category.LAUNCHER",
                 "1",

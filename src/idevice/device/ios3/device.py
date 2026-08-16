@@ -136,13 +136,12 @@ class IOSDevice3(DeviceBase):
             )
         return False
 
-    def launch_app(self, app_id: str) -> None:
-        if not app_id:
-            raise ValueError("app_id is required and must be a non-empty string")
-        if not self.is_installed(app_id):
-            raise AppNotInstalledError(f"App not installed: {app_id}")
-        logger.info(f"{_LOG_TAG} Launching app on iOS device {self.device_id}: {app_id}")
-        cmd = self._command("developer", "dvt", "launch", app_id)
+    def launch_app(self, app_id: str | None = None) -> None:
+        target = self._resolve_app_id(app_id)
+        if not self.is_installed(target):
+            raise AppNotInstalledError(f"App not installed: {target}")
+        logger.info(f"{_LOG_TAG} Launching app on iOS device {self.device_id}: {target}")
+        cmd = self._command("developer", "dvt", "launch", target)
         self._runner.run(cmd)
     
     def stop_app(self, app_id: str | None = None) -> None:

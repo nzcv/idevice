@@ -114,4 +114,4 @@ def test_optional_device_interfaces_report_unsupported_platform() -> None:
     startup_thread.join(timeout=1)
     assert startup_thread.is_alive() is False
     assert device.stop_iwda2() is None
-    assert device.xmemory_shot("snapshot.memgraph").name == "snapshot.memgraph"
+    assert device.capture_memgraph("snapshot.memgraph").name == "snapshot.memgraph"

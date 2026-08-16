@@ -159,6 +159,37 @@ def test_launch_passes_environment_and_ordered_arguments(
     ]
 
 
+def test_launch_without_app_id_uses_bound_package_name(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._runner.run.side_effect = [
+        result(stdout=f"  {APP_ID}  ExampleGame  1.0\n"),
+        result(stdout="PID: 4815\n"),
+    ]
+
+    ios4_device.launch_app()
+
+    assert ios4_device.last_launch_pid == 4815
+    assert ios4_device._runner.run.call_args_list[1].args[0][-1] == APP_ID
+    assert ios4_device._last_launch_app_id == APP_ID
+
+
+def test_launch_without_app_id_or_package_name_raises(
+    tmp_path: Path,
+) -> None:
+    with patch("idevice.device.ios4.device.ios4_binary", return_value=BINARY):
+        with patch(
+            "idevice.device.ios4.device.shutil.which", return_value=BINARY
+        ):
+            device = IOSDevice4(UDID, cache_dir=tmp_path / "cache")
+    device._runner = MagicMock()
+
+    with pytest.raises(ValueError, match="app_id is required"):
+        device.launch_app()
+
+    device._runner.run.assert_not_called()
+
+
 def test_launch_rejects_uninstalled_app(ios4_device: IOSDevice4) -> None:
     ios4_device._runner.run.return_value = result(
         stdout="Found 0 applications:\n"
@@ -405,7 +436,7 @@ def test_capture_memgraph_uses_last_pid_and_atomically_writes_output(
     }
 
 
-def test_xmemory_shot_uses_memgraph_capture(
+def test_capture_memgraph_accepts_explicit_pid(
     ios4_device: IOSDevice4, tmp_path: Path
 ) -> None:
     output = tmp_path / "snapshot.memgraph"
@@ -416,7 +447,7 @@ def test_xmemory_shot_uses_memgraph_capture(
 
     ios4_device._runner.run.side_effect = capture
 
-    assert ios4_device.xmemory_shot(output, pid=4815) == output.resolve()
+    assert ios4_device.capture_memgraph(output, pid=4815) == output.resolve()
     assert output.read_bytes() == b"memory-graph"
 
 

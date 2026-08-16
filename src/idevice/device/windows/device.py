@@ -115,12 +115,11 @@ class WindowsDevice(DeviceBase):
             return False
         return Path(cached.path).exists()
 
-    def launch_app(self, app_id: str) -> None:
-        if not app_id:
-            raise ValueError("app_id is required and must be a non-empty string")
-        cached = self._app_cache.get(app_id)
+    def launch_app(self, app_id: str | None = None) -> None:
+        target = self._resolve_app_id(app_id)
+        cached = self._app_cache.get(target)
         if cached is None or not cached.path:
-            raise FileNotFoundError(f"App is not installed: {app_id}")
+            raise FileNotFoundError(f"App is not installed: {target}")
         exe = Path(cached.path)
         if not exe.exists():
             raise FileNotFoundError(f"Exe not found: {exe}")
