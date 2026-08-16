@@ -24,6 +24,7 @@ macOS and HarmonyOS are not implemented yet.
 - Platform CLI tools on `PATH` (or configured via environment variables below):
   - **iOS (go-ios):** `ios`
   - **iOS (pymobiledevice3):** `pymobiledevice3` (default: `/opt/ios3/bin/pymobiledevice3` on Unix, `~/ios3/bin/pymobiledevice3.exe` on Windows)
+  - **iOS (ios4):** `ios4` (or set `IDEVICE_IOS4_BINARY`)
   - **Android:** `adb`
 
 Python packages `pymobiledevice3` and `uiautomator2` are installed automatically with the project (see [Install](#install)). `IOSDevice3` uses the pymobiledevice3 Python library for Documents sandbox access (`documents_*`); other iOS operations go through the CLI.
@@ -51,6 +52,14 @@ device = Device.create(Platform.IOS, device_id="00000000-0000000000000000", devi
 # iOS via pymobiledevice3 (iOS 17+ tunnel support)
 device = Device.create(Platform.IOS3, device_id="00000000-0000000000000000", device_ip="")
 
+# iOS via the Rust ios4 lifecycle backend
+device = Device.create(
+    "ios4",
+    device_id="00000000-0000000000000000",
+    device_ip="",
+    package_name="com.example.game",
+)
+
 # Android via adb (package_name is the default app id for stop_app())
 device = Device.create(
     Platform.ANDROID,
@@ -66,6 +75,57 @@ device.stop_app()  # uses bound package_name
 device.stop_app("com.example.app")  # explicit override
 device.uninstall("com.example.app")
 ```
+
+Launch an iOS game through `IOSDevice4` with malloc stack logging and ordered
+command-line arguments:
+
+```python
+from idevice.device.ios4.device import IOSDevice4
+
+game = IOSDevice4(
+    "00000000-0000000000000000",
+    package_name="com.example.game",
+)
+game.launch_app(
+    "com.example.game",
+    args=["--mode", "debug", "--label", "heap capture"],
+    environment={"MallocStackLogging": "1"},
+)
+print(game.last_launch_pid)
+snapshot = game.xmemory_shot("trash-dash.memgraph")
+print(snapshot)
+```
+
+Run the preinstalled `iwda2-Runner` through the IOS4 XCTest client. The
+host-side `ios4` process stays alive in the background until
+`stop_iwda2()` is called:
+
+```python
+from idevice.device.ios4.device import IOSDevice4
+
+device = IOSDevice4(
+    "00000000-0000000000000000",
+    device_ip="192.168.1.20",  # enables /api/health readiness polling
+)
+startup_thread = device.run_iwda2(
+    target_bundle_id="com.example.game",
+    log_path="iwda2.log",
+)
+# Startup and /api/health polling run in the background.
+print(startup_thread.name)
+
+try:
+    # iwda2 is now available at http://192.168.1.20:18201.
+    ...
+finally:
+    device.stop_iwda2()
+```
+
+The default Runner bundle ID is `com.idevice.iwda2.xctrunner`. If
+`device_ip` is empty, the startup thread verifies that the local XCTest client
+did not exit immediately but skips HTTP readiness polling. Pass
+`wait_ready=False` to skip polling even when an IP is configured. Inspect
+`device.iwda2_startup_error` after the thread finishes to detect startup errors.
 
 Android swipe (via `adb shell input swipe`):
 
@@ -117,6 +177,15 @@ uv run python examples/android_device.py
 # iOS (pymobiledevice3): lifecycle, AFC, app sandbox, Documents API
 uv run python examples/ios3_device.py
 
+# iOS (ios4): install and launch a game
+uv run python examples/ios4_device.py \
+  --udid 00000000-0000000000000000 \
+  --ipa path/to/game.ipa \
+  --app-id com.example.game \
+  --malloc-stack-logging \
+  --memgraph game.memgraph \
+  --arg=--mode --arg=debug
+
 # Install an IPA and exercise sandbox file transfer
 uv run python examples/ios3_device.py \
   --ipa path/to/app.ipa \
@@ -144,8 +213,14 @@ Every platform implementation shares the same interface:
 - `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox, supporting both files and directories (implemented on `IOSDevice3` and `WindowsDevice`; other platforms raise `NotImplementedError`)
 - `swipe(x1, y1, x2, y2, duration_ms=300)` — touch gesture (Android implemented; iOS/Windows raise `NotImplementedError`)
 - `host_is_running()` — whether WebDriverAgent / UIAutomator2 host process is up
+- `run_iwda2(...)` — launch an iwda2 XCTest Runner (currently `IOSDevice4`)
+- `stop_iwda2(graceful=True, timeout=10)` — stop the active iwda2 XCTest Runner (currently `IOSDevice4`)
+- `xmemory_shot(output, pid=None)` — capture a process memory snapshot (currently `IOSDevice4`)
 
-Use `Device.create(Platform, device_id=…, device_ip="", package_name=…)` or construct `IOSDevice`, `IOSDevice3`, `AndroidDevice`, or `WindowsDevice` directly. `Device.from_env` requires `GAUTO_PACKAGE_NAME` on all platforms.
+Use `Device.create(Platform, device_id=…, device_ip="", package_name=…)` or
+construct `IOSDevice`, `IOSDevice3`, `IOSDevice4`, `AndroidDevice`, or
+`WindowsDevice` directly. `Device.from_env` requires `GAUTO_PACKAGE_NAME` on
+all platforms.
 
 ### `UIAutoBase`
 
@@ -163,7 +238,18 @@ Higher-level UI helpers built on top of device tooling. Currently only `AndroidU
 - Documents sandbox via the pymobiledevice3 Python library (House Arrest AFC): `documents_exists`, `documents_ls`, `documents_push`, `documents_pull`, `documents_rm`
 - Developer-mode commands require a mounted DeveloperDiskImage; on iOS 17+ an active tunnel is required (`pymobiledevice3 remote start-tunnel`)
 
-Choose `Platform.IOS` or `Platform.IOS3` depending on which CLI you have deployed.
+**`IOSDevice4` (ios4)** — a game lifecycle backend using the Rust
+`ios4` binary:
+
+- IPA/app-directory install via `ideviceinstaller install`
+- Exact bundle-id checks via `application_listing`
+- Launch via `process_control`, including ordered `argv` and environment values
+- Xcode-compatible snapshots via `memgraph`, defaulting to the last launch PID
+- Tracks the returned PID so the same instance can stop the launched process
+- Does not currently implement file transfer or Documents-sandbox operations
+
+Choose `Platform.IOS`, `Platform.IOS3`, or `Platform.IOS4` depending on which
+CLI you have deployed. The string value for the new backend is `ios4`.
 
 ## Host orchestration (`idevice.host`)
 
@@ -226,6 +312,7 @@ Environment variables override default binary paths:
 |----------|---------|---------|
 | `IDEVICE_IOS_BINARY` | `ios` | `IOSDevice` |
 | `IDEVICE_IOS3_BINARY` | `/opt/ios3/bin/pymobiledevice3` (Unix) / `~/ios3/bin/pymobiledevice3.exe` (Windows) | `IOSDevice3` |
+| `IDEVICE_IOS4_BINARY` | `ios4` (`ios4.exe` on Windows) | `IOSDevice4` |
 | `IDEVICE_ADB_BINARY` | `adb` | `AndroidDevice`, `AndroidUIAuto` |
 | `IDEVICE_POWERSHELL_BINARY` | `powershell` | `WindowsDevice` |
 

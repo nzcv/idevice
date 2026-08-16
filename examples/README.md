@@ -32,3 +32,34 @@ device = AndroidDevice("emulator-5554")
 device.install(Path("tests/apk/app.apk"), app_id="com.Unity.TrashDash")
 assert device.is_installed("com.Unity.TrashDash")
 ```
+
+## iOS4: install and launch through ios4
+
+```bash
+IDEVICE_IOS4_BINARY=/path/to/ios4 \
+uv run python examples/ios4_device.py \
+  --udid 00000000-0000000000000000 \
+  --ipa path/to/TrashDash.ipa \
+  --app-id com.kidfun.TrashDash \
+  --malloc-stack-logging \
+  --memgraph trash-dash.memgraph \
+  --arg=--mode --arg=debug
+```
+
+`--arg` and `--env KEY=VALUE` may be repeated. Their order is preserved when
+the game is launched through the `process_control` service. When `--memgraph`
+is present, the example captures the returned PID immediately after launch.
+
+The IOS4 backend can also keep the preinstalled iwda2 XCTest Runner alive:
+
+```python
+from idevice.device.ios4.device import IOSDevice4
+
+device = IOSDevice4("<udid>", device_ip="<device-ip>")
+device.run_iwda2(target_bundle_id="com.kidfun.TrashDash")
+try:
+    # screenshot/tap HTTP requests use <device-ip>:18201
+    ...
+finally:
+    device.stop_iwda2()
+```

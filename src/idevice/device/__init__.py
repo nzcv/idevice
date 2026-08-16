@@ -12,6 +12,7 @@ from idevice.device.base.runner import CommandResult, SubprocessRunner
 from idevice.device.device import Device, Platform
 from idevice.device.ios.device import IOSDevice
 from idevice.device.ios3.device import IOSDevice3, IOSDevice3Error
+from idevice.device.ios4.device import IOSDevice4, IOSDevice4Error
 from idevice.device.windows.device import WindowsDevice
 
 __all__ = [
@@ -27,6 +28,8 @@ __all__ = [
     "IOSDevice",
     "IOSDevice3",
     "IOSDevice3Error",
+    "IOSDevice4",
+    "IOSDevice4Error",
     "Platform",
     "SubprocessRunner",
     "WindowsDevice",

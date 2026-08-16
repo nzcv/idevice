@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import platform
 import subprocess
+import threading
 from abc import ABC, abstractmethod
 from enum import Enum
 from pathlib import Path
@@ -49,8 +50,8 @@ class DeviceBase(ABC):
         Args:
             device_id: Device id (UDID / serial). Required and non-empty.
             device_ip: Device IP address, or an empty string when not applicable.
-            platform: Platform identifier (e.g. ``ios``, ``ios3``, ``android``,
-                ``windows``).
+            platform: Platform identifier (e.g. ``ios``, ``ios3``, ``ios4``,
+                ``android``, ``windows``).
             package_name: Default app id (bundle id / package name / exe name)
                 used when callers omit ``app_id`` (e.g. :meth:`stop_app`).
 
@@ -266,6 +267,102 @@ class DeviceBase(ABC):
             bool: True if the WDA/UIAutomator2 is running, False otherwise.
         """
         raise NotImplementedError
+
+    def run_iwda2(
+        self,
+        *,
+        runner_bundle_id: str = "com.idevice.iwda2.xctrunner",
+        target_bundle_id: str | None = None,
+        server_port: int = 18201,
+        auto_dismiss_dialogs: bool = True,
+        dialog_scan_interval: float = 0.5,
+        max_session_seconds: float = 3600,
+        command_timeout_seconds: float = 30,
+        wait_ready: bool = True,
+        ready_timeout: float = 60,
+        log_path: Path | str | None = None,
+    ) -> threading.Thread:
+        """Launch an iwda2 XCTest Runner on the bound device.
+
+        Args:
+            runner_bundle_id: Installed iwda2 ``.xctrunner`` bundle identifier.
+            target_bundle_id: Optional app bundle identifier used by iwda2.
+            server_port: HTTP port exposed by iwda2 on the device.
+            auto_dismiss_dialogs: Whether iwda2 should dismiss system dialogs.
+            dialog_scan_interval: Seconds between automatic dialog scans.
+            max_session_seconds: Maximum XCTest session lifetime in seconds.
+            command_timeout_seconds: iwda2 HTTP command timeout in seconds.
+            wait_ready: Whether to wait for the iwda2 health endpoint.
+            ready_timeout: Maximum readiness wait in seconds.
+            log_path: Optional host path for XCTest client output.
+
+        Returns:
+            threading.Thread: Background startup thread. The platform-specific
+                process ID is available from the concrete device after startup.
+
+        Raises:
+            NotImplementedError: When the platform cannot launch iwda2.
+        """
+        del (
+            runner_bundle_id,
+            target_bundle_id,
+            server_port,
+            auto_dismiss_dialogs,
+            dialog_scan_interval,
+            max_session_seconds,
+            command_timeout_seconds,
+            wait_ready,
+            ready_timeout,
+            log_path,
+        )
+        raise NotImplementedError(
+            f"run_iwda2 is not supported on {self.platform} devices"
+        )
+
+    def stop_iwda2(
+        self,
+        *,
+        graceful: bool = True,
+        timeout: float = 10,
+    ) -> None:
+        """Stop the iwda2 XCTest Runner on the bound device.
+
+        Args:
+            graceful: Request an orderly runner exit before terminating the
+                host-side XCTest client.
+            timeout: Maximum number of seconds to wait for shutdown.
+
+        Raises:
+            NotImplementedError: When the platform cannot manage iwda2.
+        """
+        del graceful, timeout
+        raise NotImplementedError(
+            f"stop_iwda2 is not supported on {self.platform} devices"
+        )
+
+    def xmemory_shot(
+        self,
+        output: Path | str,
+        *,
+        pid: int | None = None,
+    ) -> Path:
+        """Capture a process memory snapshot to ``output``.
+
+        Args:
+            output: Destination memory-snapshot file on the host.
+            pid: Optional process ID. Implementations may use the most recently
+                launched process when omitted.
+
+        Returns:
+            Path: Resolved destination path containing the snapshot.
+
+        Raises:
+            NotImplementedError: When the platform cannot capture memory.
+        """
+        del output, pid
+        raise NotImplementedError(
+            f"xmemory_shot is not supported on {self.platform} devices"
+        )
 
     @abstractmethod
     def push(

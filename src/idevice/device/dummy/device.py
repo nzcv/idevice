@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 
 from idevice.device.base.device import AppDataPath, DeviceBase
@@ -103,6 +104,59 @@ class DummyDevice(DeviceBase):
     def host_is_running(self) -> bool:
         self._noop("host_is_running")
         return False
+
+    def run_iwda2(
+        self,
+        *,
+        runner_bundle_id: str = "com.idevice.iwda2.xctrunner",
+        target_bundle_id: str | None = None,
+        server_port: int = 18201,
+        auto_dismiss_dialogs: bool = True,
+        dialog_scan_interval: float = 0.5,
+        max_session_seconds: float = 3600,
+        command_timeout_seconds: float = 30,
+        wait_ready: bool = True,
+        ready_timeout: float = 60,
+        log_path: Path | str | None = None,
+    ) -> threading.Thread:
+        del (
+            runner_bundle_id,
+            target_bundle_id,
+            server_port,
+            auto_dismiss_dialogs,
+            dialog_scan_interval,
+            max_session_seconds,
+            command_timeout_seconds,
+            wait_ready,
+            ready_timeout,
+            log_path,
+        )
+        thread = threading.Thread(
+            target=lambda: self._noop("run_iwda2"),
+            name="dummy-iwda2-startup",
+            daemon=True,
+        )
+        thread.start()
+        return thread
+
+    def stop_iwda2(
+        self,
+        *,
+        graceful: bool = True,
+        timeout: float = 10,
+    ) -> None:
+        del graceful, timeout
+        self._noop("stop_iwda2")
+
+    def xmemory_shot(
+        self,
+        output: Path | str,
+        *,
+        pid: int | None = None,
+    ) -> Path:
+        del pid
+        self._noop("xmemory_shot")
+        return Path(output).expanduser().resolve()
 
     def push(
         self,

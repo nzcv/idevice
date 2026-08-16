@@ -11,6 +11,7 @@ from idevice.device.base.device import DeviceBase
 from idevice.device.dummy.device import DummyDevice
 from idevice.device.ios.device import IOSDevice
 from idevice.device.ios3.device import IOSDevice3
+from idevice.device.ios4.device import IOSDevice4
 from idevice.device.windows.device import WindowsDevice
 
 logger = logging.getLogger(__name__)
@@ -22,13 +23,16 @@ class Platform(Enum):
     """Supported device platforms."""
 
     IOS = "_ios"
-    IOS3 = "ios"
+    IOS3 = "ios3"
+    IOS4 = "ios"
     ANDROID = "android"
     WINDOWS = "pc"
 
     @classmethod
     def from_string(cls, platform: str) -> Platform:
         """Convert a string to a Platform enum value."""
+        if platform.lower() == "ios4":
+            return cls.IOS4
         try:
             return cls(platform.lower())  # type: ignore
         except ValueError:
@@ -86,8 +90,9 @@ class Device(metaclass=_DeviceMeta):
         """Create a device instance bound to ``device_id`` for ``platform``.
 
         Args:
-            platform: Target platform (``ios``, ``ios3``, ``android`` or
-                ``windows``), as a :class:`Platform` member or its string value.
+            platform: Target platform (``ios``, ``ios3``, ``ios4``, ``android``
+                or ``windows``), as a :class:`Platform` member or its string
+                value.
             device_id: Device id (UDID / serial). Required and non-empty.
             device_ip: Device IP address, or an empty string when not applicable.
             company_name: Windows-only publisher folder under ``%LocalAppData%``.
@@ -110,6 +115,10 @@ class Device(metaclass=_DeviceMeta):
             )
         elif p is Platform.IOS3:
             device = IOSDevice3(
+                device_id, device_ip=device_ip, package_name=package_name
+            )
+        elif p is Platform.IOS4:
+            device = IOSDevice4(
                 device_id, device_ip=device_ip, package_name=package_name
             )
         elif p is Platform.ANDROID:

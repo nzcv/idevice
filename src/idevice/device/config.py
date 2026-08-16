@@ -23,6 +23,12 @@ def ios3_binary() -> str:
     return os.environ.get("IDEVICE_IOS3_BINARY", str(default))
 
 
+def ios4_binary() -> str:
+    """Return the ios4 CLI binary path."""
+    default = "ios4.exe" if sys.platform == "win32" else "ios4"
+    return os.environ.get("IDEVICE_IOS4_BINARY", default)
+
+
 def adb_binary() -> str:
     """Return the adb CLI binary path."""
     return os.environ.get("IDEVICE_ADB_BINARY", "adb")
@@ -57,7 +63,7 @@ def platform() -> str:
     """Return the target device platform (``GAUTO_PLATFORM``).
 
     The controller (``controller/src/worker/engine.rs``) injects one of
-    ``android`` | ``ios`` | ``windows`` | ``macos``.
+    ``android`` | ``ios`` | ``ios4`` | ``windows`` | ``macos``.
     """
     return os.environ.get("GAUTO_PLATFORM", "")
 
