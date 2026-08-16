@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import logging
 from enum import Enum
 
@@ -109,16 +110,16 @@ class Device(metaclass=_DeviceMeta):
         """
         p = Platform.from_string(platform)
         logger.debug(f"Creating device for platform={p} device_id={device_id}")
-        if p is Platform.IOS:
+        if p is Platform.IOS4 or os.environ.get("GAUTO_IOS4", "0") == "1":
+            device = IOSDevice4(
+                device_id, device_ip=device_ip, package_name=package_name
+            )
+        elif p is Platform.IOS:
             device: DeviceBase = IOSDevice(
                 device_id, device_ip=device_ip, package_name=package_name
             )
         elif p is Platform.IOS3:
             device = IOSDevice3(
-                device_id, device_ip=device_ip, package_name=package_name
-            )
-        elif p is Platform.IOS4:
-            device = IOSDevice4(
                 device_id, device_ip=device_ip, package_name=package_name
             )
         elif p is Platform.ANDROID:
