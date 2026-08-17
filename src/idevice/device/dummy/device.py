@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import threading
 from pathlib import Path
 
 from idevice.device.base.device import AppDataPath, DeviceBase
@@ -104,37 +103,6 @@ class DummyDevice(DeviceBase):
     def host_is_running(self) -> bool:
         self._noop("host_is_running")
         return False
-
-    def run_iwda2(
-        self,
-        *,
-        runner_bundle_id: str = "com.idevice.iwda2.xctrunner",
-        wait_ready: bool = True,
-        ready_timeout: float = 60,
-        log_path: Path | str | None = None,
-    ) -> threading.Thread:
-        del (
-            runner_bundle_id,
-            wait_ready,
-            ready_timeout,
-            log_path,
-        )
-        thread = threading.Thread(
-            target=lambda: self._noop("run_iwda2"),
-            name="dummy-iwda2-startup",
-            daemon=True,
-        )
-        thread.start()
-        return thread
-
-    def stop_iwda2(
-        self,
-        *,
-        graceful: bool = True,
-        timeout: float = 10,
-    ) -> None:
-        del graceful, timeout
-        self._noop("stop_iwda2")
 
     def capture_memgraph(
         self,

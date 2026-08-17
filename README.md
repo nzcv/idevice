@@ -105,71 +105,24 @@ snapshot = game.capture_memgraph("trash-dash.memgraph")
 print(snapshot)
 ```
 
-Run the preinstalled `iwda2-Runner` through the IOS4 XCTest client. The
-host-side `ios4` process stays alive in the background until
-`stop_iwda2()` is called:
-
-```python
-from idevice.device.ios4.device import IOSDevice4
-
-device = IOSDevice4(
-    "00000000-0000000000000000",
-    device_ip="192.168.1.20",  # enables /api/health readiness polling
-)
-startup_thread = device.run_iwda2(log_path="iwda2.log")
-# Startup and /api/health polling run in the background.
-print(startup_thread.name)
-
-try:
-    # iwda2 is now available at http://192.168.1.20:18200.
-    device.tap(0.5, 0.5, app_id="com.example.game")  # GET /api/tap
-finally:
-    device.stop_iwda2()
-```
-
-`tap` takes normalized `[0, 1]` coordinates: `(0, 0)` is the top-left corner
-and `(1, 1)` the bottom-right. Pass `app_id` so the offset is anchored to that
-app's frame instead of SpringBoard's portrait-locked one — that is what makes
-taps land correctly in landscape. It needs a reachable
-iwda2 Runner: without `device_ip`, or when the Runner is down, it raises
-`IOSDevice4Error`. Note that `screenshot` still goes through the `ios4`
-screenshot service, whose framebuffer capture is always portrait, so its axes
-only match a tap while the app runs in portrait.
-
-The default Runner bundle ID is `com.idevice.iwda2.xctrunner`, and the Runner
-serves HTTP on its own default port (18200) — the port `tap` dials. If
-`device_ip` is empty, the startup thread verifies that the local XCTest client
-did not exit immediately but skips HTTP readiness polling. Pass
-`wait_ready=False` to skip polling even when an IP is configured. Inspect
-`device.iwda2_startup_error` after the thread finishes to detect startup errors.
-
-`IOSDevice5` runs the same workflow on Apple's `xcrun devicectl`. The Runner is
-started as an ordinary app because the iwda2 bundle self-boots its own
-`XCTestConfiguration`, so there is no host-side XCTest client and
-`iwda2_process_id` reports the device-side PID:
+`IOSDevice5` provides the same game lifecycle through Apple's
+`xcrun devicectl`:
 
 ```python
 from idevice.device.ios5.device import IOSDevice5
 
 game = IOSDevice5(
     IOSDevice5.default_udid(),  # first USB-attached device
-    device_ip="192.168.1.20",
     package_name="com.example.game",
 )
-game.run_iwda2().join()  # launches com.idevice.iwda2.xctrunner, polls /api/health
 game.launch_app(
     "com.example.game",
     args=["--mode", "debug"],
     environment={"MallocStackLogging": "1"},
 )
-game.tap(0.5, 0.5, app_id="com.example.game")
 game.screenshot("screen.png")
 snapshot = game.capture_memgraph("trash-dash.memgraph")  # shells out to ios4
 ```
-
-`run_iwda2` injects `SERVER_PORT` (default 18201, override with
-`IDEVICE_IWDA2_PORT` or the `iwda2_server_port` argument), `MAX_SESSION_SECONDS=0`
-and, from the bound `package_name`, `TARGET_BUNDLE_ID`.
 
 Android swipe (via `adb shell input swipe`):
 
@@ -230,13 +183,11 @@ uv run python examples/ios4_device.py \
   --memgraph game.memgraph \
   --arg=--mode --arg=debug
 
-# iOS (devicectl): install, start iwda2, launch, screenshot
+# iOS (devicectl): install, launch, screenshot
 uv run python examples/ios5_device.py \
   --udid 00000000-0000000000000000 \
-  --device-ip 192.168.1.20 \
   --ipa path/to/game.ipa \
   --app-id com.example.game \
-  --run-iwda2 \
   --screenshot screen.png
 
 # Install an IPA and exercise sandbox file transfer
@@ -265,11 +216,9 @@ Every platform implementation shares the same interface:
 - `ls(remote, app_id=None, recursive=False)` — list a remote directory on the device
 - `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox, supporting both files and directories (implemented on `IOSDevice3` and `WindowsDevice`, and all but `documents_rm` on `IOSDevice5`; other platforms raise `NotImplementedError`)
 - `swipe(x1, y1, x2, y2, duration_ms=300)` — touch gesture (Android implemented; iOS/Windows raise `NotImplementedError`)
-- `tap(x, y, app_id=None)` — tap a normalized point in `[0, 1]` (`IOSDevice4` and `IOSDevice5`, via iwda2)
+- `tap(x, y, app_id=None)` — optional touch input; currently unsupported by the built-in backends
 - `screenshot(local)` — capture the screen to a host file
 - `host_is_running()` — whether WebDriverAgent / UIAutomator2 host process is up
-- `run_iwda2(...)` — launch an iwda2 XCTest Runner (`IOSDevice4` and `IOSDevice5`)
-- `stop_iwda2(graceful=True, timeout=10)` — stop the active iwda2 XCTest Runner (`IOSDevice4` and `IOSDevice5`)
 - `capture_memgraph(output, pid=None)` — capture a process memory snapshot (`IOSDevice4`, and `IOSDevice5` by shelling out to `ios4`)
 
 Use `Device.create(Platform, device_id=…, device_ip="", package_name=…)` or
@@ -300,9 +249,9 @@ Higher-level UI helpers built on top of device tooling. Currently only `AndroidU
 - Exact bundle-id checks via `application_listing`
 - Launch via `process_control`, including ordered `argv` and environment values
 - Xcode-compatible snapshots via `memgraph`, defaulting to the last launch PID
-- Tracks the returned PID so `memgraph` and the runner cleanup can reuse it
+- Tracks the returned PID so `memgraph` can reuse it
 - Stop via `pkill --bundle`, which kills the app whether or not this instance launched it
-- Screen capture via `screenshot`, and `tap` through the running iwda2 Runner over HTTP
+- Screen capture via `screenshot`
 - Does not currently implement file transfer or Documents-sandbox operations
 
 **`IOSDevice5` (xcrun devicectl)** — the same game lifecycle on Apple's own
@@ -313,8 +262,7 @@ CoreDevice CLI, so it needs macOS with Xcode but no third-party binary:
 - Launch via `device process launch`, with the environment as a JSON dictionary and `argv` as real positional arguments
 - Stop by resolving the bundle's processes in `device info processes` and terminating each with `device process terminate --kill`
 - App data container transfers via `device copy to` / `device copy from` and listing via `device info files`, including the Documents sandbox
-- Screen capture via `device capture screenshot` on Xcode 27+, falling back first to `ios4` and then to the iwda2 Runner's `/api/screenshot`
-- `run_iwda2` launches the Runner as a normal app, relying on the iwda2 self-boot library; devicectl has no XCTest command
+- Screen capture via `device capture screenshot` on Xcode 27+, falling back to `ios4`
 - `capture_memgraph` shells out to `ios4`: CoreDevice exposes no memory-graph service
 - `documents_rm`, `delete2` and `swipe` raise `NotImplementedError` — CoreDevice has no file-removal or touch-injection service
 
@@ -390,7 +338,6 @@ Environment variables override default binary paths:
 | `IDEVICE_IOS4_BINARY` | `ios4` (`ios4.exe` on Windows) | `IOSDevice4`, `IOSDevice5.capture_memgraph` |
 | `IDEVICE_IDEVICEINSTALLER_BINARY` | `ideviceinstaller` (`ideviceinstaller.exe` on Windows) | `IOSDevice4.install` (falls back to `ios4` when missing) |
 | `IDEVICE_XCRUN_BINARY` | `xcrun` | `IOSDevice5` |
-| `IDEVICE_IWDA2_PORT` | `18201` | `IOSDevice5` iwda2 HTTP port |
 | `IDEVICE_ADB_BINARY` | `adb` | `AndroidDevice`, `AndroidUIAuto` |
 | `IDEVICE_POWERSHELL_BINARY` | `powershell` | `WindowsDevice` |
 

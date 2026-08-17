@@ -6,8 +6,6 @@ Prerequisites:
     * A paired iOS device with Developer Mode enabled.
     * ``ios4`` on PATH when ``--memgraph`` is used or as the first screenshot
       fallback; CoreDevice has no memory-graph service.
-    * A preinstalled iwda2 Runner when ``--run-iwda2`` is used or as the final
-      screenshot fallback.
 """
 
 from __future__ import annotations
@@ -35,7 +33,6 @@ def main() -> None:
     """Parse command-line options, optionally install, and launch the game."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--udid", help="Device UDID; defaults to the USB device")
-    parser.add_argument("--device-ip", default="", help="Device IP, for iwda2 access")
     parser.add_argument("--ipa", type=Path, help="IPA or app directory to install")
     parser.add_argument("--app-id", required=True, help="Game bundle identifier")
     parser.add_argument(
@@ -47,11 +44,6 @@ def main() -> None:
         "--screenshot",
         type=Path,
         help="Capture the screen to this PNG after launching",
-    )
-    parser.add_argument(
-        "--run-iwda2",
-        action="store_true",
-        help="Start the preinstalled iwda2 Runner before launching the game",
     )
     parser.add_argument(
         "--arg",
@@ -74,18 +66,10 @@ def main() -> None:
     options = parser.parse_args()
 
     udid = options.udid or IOSDevice5.default_udid()
-    device = IOSDevice5(
-        udid, device_ip=options.device_ip, package_name=options.app_id
-    )
+    device = IOSDevice5(udid, package_name=options.app_id)
 
     if options.ipa and not device.install(options.ipa, app_id=options.app_id):
         raise SystemExit(f"Installation failed: {options.ipa}")
-
-    if options.run_iwda2:
-        device.run_iwda2().join()
-        if device.iwda2_startup_error is not None:
-            raise SystemExit(f"iwda2 startup failed: {device.iwda2_startup_error}")
-        print(f"iwda2 Runner is ready with device PID {device.iwda2_process_id}")
 
     environment = _environment(options.env, options.malloc_stack_logging)
     device.launch_app(

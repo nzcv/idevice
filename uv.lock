@@ -1037,6 +1037,7 @@ dependencies = [
     { name = "requests", version = "2.32.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "requests", version = "2.34.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "uiautomator2" },
+    { name = "wda" },
 ]
 
 [package.optional-dependencies]
@@ -1064,6 +1065,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.5" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9" },
     { name = "uiautomator2", specifier = ">=3.5.2" },
+    { name = "wda", specifier = ">=0.3.0" },
 ]
 provides-extras = ["dev"]
 
@@ -3434,6 +3436,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/34/74/c6428f875774288be
 wheels = [
     { url = "https://files.pythonhosted.org/packages/96/42/3e5985a0a7e57de470b320c6d6a1a67c844f6737a587f3d44dd13d1819e7/wcwidth-0.8.2-py3-none-any.whl", hash = "sha256:d63947694a0539a1d51e01eda7caf800c291020e6cdd7e28ad7b14dd33ad4f85", size = 323166, upload-time = "2026-06-29T18:11:09.888Z" },
 ]
+
+[[package]]
+name = "wda"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/91/e3/24806fcec7b04305684abab66c1ce5efc9fdc6208f33255988fccae1b185/wda-0.3.0.tar.gz", hash = "sha256:bba9e2c26c1b8c475995ff586de0554e78726e829e0c061b546206eff93ddb28", size = 19369, upload-time = "2019-06-20T09:58:39.953Z" }
 
 [[package]]
 name = "wsproto"

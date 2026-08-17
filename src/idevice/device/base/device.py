@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import platform
 import subprocess
-import threading
 from abc import ABC, abstractmethod
 from enum import Enum
 from pathlib import Path
@@ -287,60 +286,6 @@ class DeviceBase(ABC):
             bool: True if the WDA/UIAutomator2 is running, False otherwise.
         """
         raise NotImplementedError
-
-    def run_iwda2(
-        self,
-        *,
-        runner_bundle_id: str = "com.idevice.iwda2.xctrunner",
-        wait_ready: bool = True,
-        ready_timeout: float = 60,
-        log_path: Path | str | None = None,
-    ) -> threading.Thread:
-        """Launch an iwda2 XCTest Runner on the bound device.
-
-        Args:
-            runner_bundle_id: Installed iwda2 ``.xctrunner`` bundle identifier.
-            wait_ready: Whether to wait for the iwda2 health endpoint.
-            ready_timeout: Maximum readiness wait in seconds.
-            log_path: Optional host path for XCTest client output.
-
-        Returns:
-            threading.Thread: Background startup thread. The platform-specific
-                process ID is available from the concrete device after startup.
-
-        Raises:
-            NotImplementedError: When the platform cannot launch iwda2.
-        """
-        del (
-            runner_bundle_id,
-            wait_ready,
-            ready_timeout,
-            log_path,
-        )
-        raise NotImplementedError(
-            f"run_iwda2 is not supported on {self.platform} devices"
-        )
-
-    def stop_iwda2(
-        self,
-        *,
-        graceful: bool = True,
-        timeout: float = 10,
-    ) -> None:
-        """Stop the iwda2 XCTest Runner on the bound device.
-
-        Args:
-            graceful: Request an orderly runner exit before terminating the
-                host-side XCTest client.
-            timeout: Maximum number of seconds to wait for shutdown.
-
-        Raises:
-            NotImplementedError: When the platform cannot manage iwda2.
-        """
-        del graceful, timeout
-        raise NotImplementedError(
-            f"stop_iwda2 is not supported on {self.platform} devices"
-        )
 
     def capture_memgraph(
         self,

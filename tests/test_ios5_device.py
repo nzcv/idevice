@@ -8,7 +8,6 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-import requests
 
 from idevice.device.base.device import AppDataPath
 from idevice.device.base.errors import AppNotInstalledError, DeviceNotFoundError
@@ -20,12 +19,10 @@ from idevice.device.ios5.device import (
 )
 
 APP_ID = "com.example.game"
-IWDA2_RUNNER_ID = "com.idevice.iwda2.xctrunner"
 IOS4_BINARY = "/opt/ios4"
 UDID = "00008030-000655392E01802E"
 DEVICE_IP = "192.168.1.20"
 APP_URL = "file:///private/var/containers/Bundle/Application/AAAA/ExampleGame.app/"
-RUNNER_URL = "file:///private/var/containers/Bundle/Application/BBBB/iwda2-Runner.app/"
 
 
 @pytest.fixture
@@ -60,15 +57,6 @@ def outcome(
 def app_listing(bundle_id: str, url: str) -> DevicectlOutcome:
     """Create a ``device info apps`` outcome holding one application."""
     return outcome({"apps": [{"bundleIdentifier": bundle_id, "url": url}]})
-
-
-def response(status_code: int = 200, content: bytes = b"") -> MagicMock:
-    """Create a requests-style response for mocked iwda2 calls."""
-    stub = MagicMock()
-    stub.status_code = status_code
-    stub.content = content
-    stub.text = content.decode("utf-8", "replace")
-    return stub
 
 
 def command_of(mock: MagicMock, index: int) -> list[str]:
@@ -386,7 +374,10 @@ def test_stop_app_terminates_only_processes_of_that_bundle(
     processes = {
         "runningProcesses": [
             {"executable": f"{APP_URL}ExampleGame", "processIdentifier": 501},
-            {"executable": f"{RUNNER_URL}iwda2-Runner", "processIdentifier": 502},
+            {
+                "executable": "file:///Applications/Other.app/Other",
+                "processIdentifier": 502,
+            },
             {"executable": "file:///sbin/launchd", "processIdentifier": 1},
         ]
     }
@@ -429,108 +420,16 @@ def test_host_is_running_detects_the_runner_executable(
         return_value=outcome(
             {
                 "runningProcesses": [
-                    {"executable": f"{RUNNER_URL}iwda2-Runner", "processIdentifier": 3}
+                    {
+                        "executable": "file:///Applications/WebDriverAgentRunner",
+                        "processIdentifier": 3,
+                    }
                 ]
             }
         )
     )
 
     assert ios5_device.host_is_running() is True
-
-
-def test_run_iwda2_launches_the_runner_with_its_server_port(
-    ios5_device: IOSDevice5,
-) -> None:
-    ios5_device._run = MagicMock(
-        side_effect=[
-            app_listing(IWDA2_RUNNER_ID, RUNNER_URL),
-            outcome({"process": {"processIdentifier": 3461}}),
-        ]
-    )
-
-    with patch("idevice.device.ios5.device.requests.get", return_value=response()):
-        ios5_device.run_iwda2(runner_bundle_id=IWDA2_RUNNER_ID).join(timeout=5)
-
-    assert ios5_device.iwda2_startup_error is None
-    assert ios5_device.iwda2_process_id == 3461
-    launch = command_of(ios5_device._run, 1)
-    assert json.loads(launch[launch.index("--environment-variables") + 1]) == {
-        "MAX_SESSION_SECONDS": "0",
-        "SERVER_PORT": "18201",
-        "TARGET_BUNDLE_ID": APP_ID,
-    }
-    assert launch[launch.index("--") + 1 :] == [IWDA2_RUNNER_ID]
-
-
-def test_run_iwda2_records_a_readiness_timeout(ios5_device: IOSDevice5) -> None:
-    ios5_device._run = MagicMock(
-        side_effect=[
-            app_listing(IWDA2_RUNNER_ID, RUNNER_URL),
-            outcome({"process": {"processIdentifier": 3461}}),
-        ]
-    )
-
-    with patch(
-        "idevice.device.ios5.device.requests.get",
-        side_effect=requests.ConnectionError("refused"),
-    ):
-        ios5_device.run_iwda2(
-            runner_bundle_id=IWDA2_RUNNER_ID, ready_timeout=0.05
-        ).join(timeout=5)
-
-    assert isinstance(ios5_device.iwda2_startup_error, IOSDevice5Error)
-    assert "did not become ready" in str(ios5_device.iwda2_startup_error)
-
-
-def test_run_iwda2_rejects_an_uninstalled_runner(ios5_device: IOSDevice5) -> None:
-    ios5_device._run = MagicMock(return_value=outcome({"apps": []}))
-
-    with pytest.raises(AppNotInstalledError):
-        ios5_device.run_iwda2(runner_bundle_id=IWDA2_RUNNER_ID)
-
-
-def test_stop_iwda2_asks_the_runner_to_exit_before_killing_it(
-    ios5_device: IOSDevice5,
-) -> None:
-    lingering = {
-        "runningProcesses": [
-            {"executable": f"{RUNNER_URL}iwda2-Runner", "processIdentifier": 3461}
-        ]
-    }
-    ios5_device._run = MagicMock(
-        side_effect=[outcome(lingering), outcome(lingering), outcome({})]
-    )
-
-    with patch(
-        "idevice.device.ios5.device.requests.get", return_value=response()
-    ) as get:
-        ios5_device.stop_iwda2(timeout=0.05)
-
-    assert get.call_args_list[0].args[0] == f"http://{DEVICE_IP}:18201/api/exit"
-    assert command_of(ios5_device._run, 2)[-3:] == ["--pid", "3461", "--kill"]
-    assert ios5_device.iwda2_process_id is None
-
-
-def test_tap_sends_normalized_coordinates(ios5_device: IOSDevice5) -> None:
-    with patch(
-        "idevice.device.ios5.device.requests.get", return_value=response()
-    ) as get:
-        ios5_device.tap(0.5, 0.75, app_id=APP_ID)
-
-    assert get.call_args.args[0] == f"http://{DEVICE_IP}:18201/api/tap"
-    assert get.call_args.kwargs["params"] == {
-        "x": "0.5",
-        "y": "0.75",
-        "bundleId": APP_ID,
-    }
-
-
-@pytest.mark.parametrize("coordinate", [-0.1, 1.1, True, "0.5"])
-def test_tap_rejects_coordinates_outside_the_unit_square(
-    ios5_device: IOSDevice5, coordinate: Any
-) -> None:
-    with pytest.raises(ValueError, match="normalized coordinate"):
-        ios5_device.tap(coordinate, 0.5)
 
 
 XCODE_26_DEVICE_HELP = """SUBCOMMANDS:
@@ -599,7 +498,7 @@ def test_screenshot_uses_ios4_when_devicectl_capture_fails(
     assert destination.read_bytes() == b"ios4-png"
 
 
-def test_screenshot_falls_back_to_iwda2_when_devicectl_and_ios4_fail(
+def test_screenshot_fails_when_devicectl_and_ios4_fail(
     ios5_device: IOSDevice5, tmp_path: Path
 ) -> None:
     ios5_device._runner.run.side_effect = [
@@ -614,14 +513,9 @@ def test_screenshot_falls_back_to_iwda2_when_devicectl_and_ios4_fail(
     with patch(
         "idevice.device.ios5.device.shutil.which", return_value=IOS4_BINARY
     ):
-        with patch(
-            "idevice.device.ios5.device.requests.get",
-            return_value=response(content=b"iwda2-png"),
-        ) as get:
-            assert ios5_device.screenshot(destination) is True
+        assert ios5_device.screenshot(destination) is False
 
-    assert destination.read_bytes() == b"iwda2-png"
-    assert get.call_args.args[0] == f"http://{DEVICE_IP}:18201/api/screenshot"
+    assert destination.exists() is False
 
 
 def test_screenshot_uses_devicectl_capture_when_available(
@@ -770,6 +664,8 @@ def test_ls_reports_a_failed_listing(ios5_device: IOSDevice5) -> None:
 def test_operations_without_a_coredevice_service_are_unsupported(
     ios5_device: IOSDevice5,
 ) -> None:
+    with pytest.raises(NotImplementedError, match="tap"):
+        ios5_device.tap(0.5, 0.5)
     with pytest.raises(NotImplementedError, match="swipe"):
         ios5_device.swipe(0, 0, 10, 10)
     with pytest.raises(NotImplementedError, match="documents_rm"):

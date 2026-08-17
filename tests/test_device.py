@@ -110,8 +110,4 @@ def test_ping_uses_subprocess_returncode(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_optional_device_interfaces_report_unsupported_platform() -> None:
     device = DummyDevice("configured for test", platform="dummy")
 
-    startup_thread = device.run_iwda2()
-    startup_thread.join(timeout=1)
-    assert startup_thread.is_alive() is False
-    assert device.stop_iwda2() is None
     assert device.capture_memgraph("snapshot.memgraph").name == "snapshot.memgraph"
