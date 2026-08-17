@@ -122,7 +122,98 @@ Found 2 applications:
     )
 
 
-def test_launch_passes_environment_and_ordered_arguments(
+def test_launch_uses_wda_first_and_keeps_the_session_open(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._runner.run.return_value = result(
+        stdout=f"  {APP_ID}  ExampleGame  1.0\n"
+    )
+    wda_session = MagicMock()
+    wda_session.app_list.return_value = [
+        {"pid": 52, "bundleId": "com.apple.springboard"},
+        {"pid": 4815, "bundleId": APP_ID},
+    ]
+    wda_client = MagicMock()
+    wda_client.session.return_value = wda_session
+
+    with patch(
+        "idevice.device.ios4.device.wda.Client", return_value=wda_client
+    ) as client:
+        ios4_device.launch_app(
+            APP_ID,
+            args=["--mode", "debug"],
+            environment={"MallocStackLogging": "1"},
+        )
+
+    client.assert_called_once_with(None)
+    wda_client.session.assert_called_once_with(
+        APP_ID,
+        arguments=["--mode", "debug"],
+        environment={"MallocStackLogging": "1"},
+    )
+    wda_session.close.assert_not_called()
+    wda_session.__exit__.assert_not_called()
+    assert ios4_device.last_launch_pid == 4815
+    assert ios4_device._last_launch_app_id == APP_ID
+    assert ios4_device._runner.run.call_count == 1
+    assert ios4_device._runner.run.call_args.args[0] == [
+        BINARY,
+        "--udid",
+        UDID,
+        "application_listing",
+    ]
+
+
+def test_launch_via_wda_leaves_pid_unset_when_wda_reports_none(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._runner.run.return_value = result(
+        stdout=f"  {APP_ID}  ExampleGame  1.0\n"
+    )
+    wda_session = MagicMock()
+    wda_session.app_list.return_value = [
+        {"pid": 52, "bundleId": "com.apple.springboard"}
+    ]
+    wda_client = MagicMock()
+    wda_client.session.return_value = wda_session
+
+    with patch(
+        "idevice.device.ios4.device.wda.Client", return_value=wda_client
+    ):
+        ios4_device.launch_app(APP_ID)
+
+    wda_client.session.assert_called_once_with(
+        APP_ID, arguments=None, environment=None
+    )
+    assert ios4_device.last_launch_pid is None
+    assert ios4_device._last_launch_app_id == APP_ID
+    assert ios4_device._runner.run.call_count == 1
+
+
+def test_launch_addresses_wda_on_the_bound_device_ip(tmp_path: Path) -> None:
+    with patch("idevice.device.ios4.device.ios4_binary", return_value=BINARY):
+        with patch(
+            "idevice.device.ios4.device.shutil.which", return_value=BINARY
+        ):
+            device = IOSDevice4(
+                UDID,
+                device_ip="10.0.0.5",
+                package_name=APP_ID,
+                cache_dir=tmp_path / "cache",
+            )
+    device._runner = MagicMock()
+    device._runner.run.return_value = result(
+        stdout=f"  {APP_ID}  ExampleGame  1.0\n"
+    )
+
+    with patch("idevice.device.ios4.device.wda.Client") as client:
+        client.return_value.session.return_value.app_list.return_value = []
+        device.launch_app(APP_ID)
+
+    client.assert_called_once_with("http://10.0.0.5:8100")
+
+
+def test_launch_falls_back_to_process_control_when_wda_fails(
     ios4_device: IOSDevice4,
 ) -> None:
     ios4_device._runner.run.side_effect = [
@@ -130,11 +221,15 @@ def test_launch_passes_environment_and_ordered_arguments(
         result(stdout="PID: 4815\n"),
     ]
 
-    ios4_device.launch_app(
-        APP_ID,
-        args=["--mode", "debug", "--label", "foo,bar", r"C:\tmp"],
-        environment={"MallocStackLogging": "1", "FOO": "bar=baz"},
-    )
+    with patch(
+        "idevice.device.ios4.device.wda.Client",
+        side_effect=RuntimeError("wda unreachable"),
+    ):
+        ios4_device.launch_app(
+            APP_ID,
+            args=["--mode", "debug", "--label", "foo,bar", r"C:\tmp"],
+            environment={"MallocStackLogging": "1", "FOO": "bar=baz"},
+        )
 
     assert ios4_device.last_launch_pid == 4815
     assert ios4_device._runner.run.call_args_list[0].args[0] == [
@@ -164,7 +259,11 @@ def test_launch_without_app_id_uses_bound_package_name(
         result(stdout="PID: 4815\n"),
     ]
 
-    ios4_device.launch_app()
+    with patch(
+        "idevice.device.ios4.device.wda.Client",
+        side_effect=RuntimeError("wda unreachable"),
+    ):
+        ios4_device.launch_app()
 
     assert ios4_device.last_launch_pid == 4815
     assert ios4_device._runner.run.call_args_list[1].args[0][-1] == APP_ID
@@ -181,10 +280,12 @@ def test_launch_without_app_id_or_package_name_raises(
             device = IOSDevice4(UDID, cache_dir=tmp_path / "cache")
     device._runner = MagicMock()
 
-    with pytest.raises(ValueError, match="app_id is required"):
-        device.launch_app()
+    with patch("idevice.device.ios4.device.wda.Client") as client:
+        with pytest.raises(ValueError, match="app_id is required"):
+            device.launch_app()
 
     device._runner.run.assert_not_called()
+    client.assert_not_called()
 
 
 def test_launch_rejects_uninstalled_app(ios4_device: IOSDevice4) -> None:
@@ -192,10 +293,26 @@ def test_launch_rejects_uninstalled_app(ios4_device: IOSDevice4) -> None:
         stdout="Found 0 applications:\n"
     )
 
-    with pytest.raises(AppNotInstalledError, match="App not installed"):
-        ios4_device.launch_app(APP_ID)
+    with patch("idevice.device.ios4.device.wda.Client") as client:
+        with pytest.raises(AppNotInstalledError, match="App not installed"):
+            ios4_device.launch_app(APP_ID)
 
     assert ios4_device._runner.run.call_count == 1
+    client.assert_not_called()
+
+
+def test_launch_validates_encoding_before_reaching_wda(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._runner.run.return_value = result(
+        stdout=f"  {APP_ID}  ExampleGame  1.0\n"
+    )
+
+    with patch("idevice.device.ios4.device.wda.Client") as client:
+        with pytest.raises(ValueError, match="cannot be empty"):
+            ios4_device.launch_app(APP_ID, args=["--mode", ""])
+
+    client.assert_not_called()
 
 
 def test_launch_requires_pid_in_process_control_output(
@@ -206,8 +323,12 @@ def test_launch_requires_pid_in_process_control_output(
         result(stdout="launch completed without pid\n"),
     ]
 
-    with pytest.raises(IOSDevice4Error, match="did not return a PID"):
-        ios4_device.launch_app(APP_ID)
+    with patch(
+        "idevice.device.ios4.device.wda.Client",
+        side_effect=RuntimeError("wda unreachable"),
+    ):
+        with pytest.raises(IOSDevice4Error, match="did not return a PID"):
+            ios4_device.launch_app(APP_ID)
 
 
 def test_capture_memgraph_uses_last_pid_and_atomically_writes_output(

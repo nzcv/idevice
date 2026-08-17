@@ -49,7 +49,8 @@ class IOSDevice4(DeviceBase):
     ``ios4`` subcommands:
 
     * ``application_listing`` for exact bundle-id checks.
-    * ``process_control`` for launch environment and ordered arguments.
+    * WebDriverAgent for launches, with ``process_control`` as the fallback
+      that also reports the launch PID.
     * ``screenshot`` for screen capture.
     * ``memgraph`` for Xcode-compatible process memory snapshots.
     * WebDriverAgent, with ``pkill --bundle`` as the stop fallback.
@@ -254,6 +255,16 @@ class IOSDevice4(DeviceBase):
     ) -> None:
         """Launch an installed game with optional environment and ``argv``.
 
+        The launch is attempted through WebDriverAgent first and falls back to
+        ``ios4 process_control``. Arguments and environment values are encoded
+        for ``process_control`` before either transport runs, so both paths
+        reject the same inputs.
+
+        WDA does not report a PID, so :attr:`last_launch_pid` is resolved
+        best-effort from the WDA app list and stays ``None`` when that list
+        does not contain the launched bundle. The ``process_control`` fallback
+        always reports a PID.
+
         Args:
             app_id: Bundle identifier to launch. When omitted or empty, uses
                 the bound :attr:`package_name`.
@@ -263,20 +274,35 @@ class IOSDevice4(DeviceBase):
         Raises:
             ValueError: If both ``app_id`` and :attr:`package_name` are empty.
             AppNotInstalledError: If the resolved bundle id is not installed.
-            IOSDevice4Error: If process control does not return a PID.
+            IOSDevice4Error: If WDA is unavailable and process control does not
+                return a PID.
         """
         target = self._resolve_app_id(app_id)
         if not self.is_installed(target):
             raise AppNotInstalledError(f"App not installed: {target}")
 
-        command = self._command("process_control")
-        if environment:
-            command.extend(["--env", self._encode_environment(environment)])
-        if args:
-            command.extend(["--args", self._encode_launch_arguments(args)])
-        command.append(target)
+        encoded_environment = (
+            self._encode_environment(environment) if environment else ""
+        )
+        encoded_arguments = (
+            self._encode_launch_arguments(args) if args else ""
+        )
 
         logger.info(f"{_LOG_TAG} Launching {target} on {self.device_id}")
+        if self._launch_app_via_wda(target, args or [], environment or {}):
+            return
+
+        logger.info(
+            f"{_LOG_TAG} Falling back to ios4 process_control for {target} "
+            f"on {self.device_id}"
+        )
+        command = self._command("process_control")
+        if encoded_environment:
+            command.extend(["--env", encoded_environment])
+        if encoded_arguments:
+            command.extend(["--args", encoded_arguments])
+        command.append(target)
+
         result = self._runner.run(command)
         match = _PID_PATTERN.search(f"{result.stdout}\n{result.stderr}")
         if match is None:
@@ -385,11 +411,61 @@ class IOSDevice4(DeviceBase):
             )
         self._clear_last_launch(target)
 
+    def _wda_url(self) -> str | None:
+        """Return the bound WDA base URL, or ``None`` for the client default."""
+        return f"http://{self.device_ip}:{_WDA_PORT}" if self.device_ip else None
+
+    def _launch_app_via_wda(
+        self, app_id: str, args: list[str], environment: dict[str, str]
+    ) -> bool:
+        """Return whether WDA launched ``app_id``.
+
+        The WDA session is deliberately left open: deleting it terminates the
+        application under test on some WebDriverAgent builds.
+        """
+        try:
+            session = wda.Client(self._wda_url()).session(
+                app_id,
+                arguments=args or None,
+                environment=environment or None,
+            )
+        except Exception as exc:
+            logger.warning(
+                f"{_LOG_TAG} WDA failed to launch {app_id} on "
+                f"{self.device_id}: {exc}"
+            )
+            return False
+
+        self._last_launch_pid = self._wda_pid(session, app_id)
+        self._last_launch_app_id = app_id
+        if self._last_launch_pid is None:
+            logger.warning(
+                f"{_LOG_TAG} WDA launched {app_id} on {self.device_id} without "
+                "a PID; pass pid explicitly to capture_memgraph"
+            )
+        return True
+
+    def _wda_pid(self, session: wda.Client, app_id: str) -> int | None:
+        """Return the PID WDA reports for ``app_id``, when it reports one."""
+        try:
+            entries = session.app_list()
+        except Exception as exc:
+            logger.debug(
+                f"{_LOG_TAG} WDA app list unavailable on {self.device_id}: {exc}"
+            )
+            return None
+        for entry in entries or []:
+            if entry.get("bundleId") != app_id:
+                continue
+            pid = entry.get("pid")
+            if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
+                return pid
+        return None
+
     def _stop_app_via_wda(self, app_id: str) -> bool:
         """Return whether WDA accepted an app-termination request."""
-        url = f"http://{self.device_ip}:{_WDA_PORT}" if self.device_ip else None
         try:
-            with wda.Client(url).session() as session:
+            with wda.Client(self._wda_url()).session() as session:
                 session.app_terminate(app_id)
         except Exception as exc:
             logger.warning(
@@ -444,13 +520,12 @@ class IOSDevice4(DeviceBase):
         """
         self._validate_normalized_coordinate(x, "x")
         self._validate_normalized_coordinate(y, "y")
-        url = f"http://{self.device_ip}:{_WDA_PORT}" if self.device_ip else None
         app_context = f" for {app_id}" if app_id else ""
         logger.info(
             f"{_LOG_TAG} Tapping ({x}, {y}) on {self.device_id}{app_context}"
         )
         try:
-            with wda.Client(url).session() as session:
+            with wda.Client(self._wda_url()).session() as session:
                 session.click(float(x), float(y))
         except Exception as exc:
             raise IOSDevice4Error(
