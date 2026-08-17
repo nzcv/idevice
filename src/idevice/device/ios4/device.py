@@ -266,8 +266,8 @@ class IOSDevice4(DeviceBase):
             IOSDevice4Error: If process control does not return a PID.
         """
         target = self._resolve_app_id(app_id)
-        if not self.is_installed(target):
-            raise AppNotInstalledError(f"App not installed: {target}")
+        # if not self.is_installed(target):
+        #     raise AppNotInstalledError(f"App not installed: {target}")
 
         command = self._command("process_control")
         if environment:
