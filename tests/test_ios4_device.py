@@ -270,15 +270,44 @@ def test_capture_memgraph_failure_preserves_existing_output(
     assert output.read_bytes() == b"previous"
 
 
-def test_stop_pkills_the_bundle_and_clears_the_tracked_pid(
+def test_stop_uses_wda_first_and_clears_the_tracked_pid(
     ios4_device: IOSDevice4,
 ) -> None:
     ios4_device._last_launch_pid = 4815
     ios4_device._last_launch_app_id = APP_ID
+    wda_session = MagicMock()
+    wda_client = MagicMock()
+    wda_client.session.return_value = wda_session
+
+    with patch(
+        "idevice.device.ios4.device.wda.Client", return_value=wda_client
+    ) as client:
+        ios4_device.stop_app()
+
+    client.assert_called_once_with(None)
+    wda_client.session.assert_called_once_with()
+    wda_session.http.post.assert_called_once_with(
+        "/wda/apps/terminate", {"bundleId": APP_ID}
+    )
+    ios4_device._runner.run.assert_not_called()
+    assert ios4_device.last_launch_pid is None
+
+
+def test_stop_falls_back_to_ios4_when_wda_fails(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._device_ip = "192.0.2.10"
+    ios4_device._last_launch_pid = 4815
+    ios4_device._last_launch_app_id = APP_ID
     ios4_device._runner.run.return_value = result(stdout="Killed 4815 (Game)\n")
 
-    ios4_device.stop_app()
+    with patch(
+        "idevice.device.ios4.device.wda.Client",
+        side_effect=RuntimeError("WDA unavailable"),
+    ) as client:
+        ios4_device.stop_app()
 
+    client.assert_called_once_with("http://192.0.2.10:8100")
     ios4_device._runner.run.assert_called_once_with(
         [
             BINARY,
@@ -298,11 +327,12 @@ def test_stop_keeps_the_tracked_pid_of_another_app(
 ) -> None:
     ios4_device._last_launch_pid = 4815
     ios4_device._last_launch_app_id = APP_ID
-    ios4_device._runner.run.return_value = result(
-        stdout="No running process matches com.example.other\n"
-    )
+    wda_session = MagicMock()
+    wda_client = MagicMock()
+    wda_client.session.return_value = wda_session
 
-    ios4_device.stop_app("com.example.other")
+    with patch("idevice.device.ios4.device.wda.Client", return_value=wda_client):
+        ios4_device.stop_app("com.example.other")
 
     assert ios4_device.last_launch_pid == 4815
 
@@ -312,8 +342,12 @@ def test_stop_raises_when_pkill_fails(ios4_device: IOSDevice4) -> None:
         returncode=1, stderr="No installed application with bundle ID\n"
     )
 
-    with pytest.raises(IOSDevice4Error, match="Failed to stop"):
-        ios4_device.stop_app()
+    with patch(
+        "idevice.device.ios4.device.wda.Client",
+        side_effect=RuntimeError("WDA unavailable"),
+    ):
+        with pytest.raises(IOSDevice4Error, match="Failed to stop"):
+            ios4_device.stop_app()
 
 
 def test_screenshot_uses_the_ios4_screenshot_service(

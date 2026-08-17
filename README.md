@@ -250,7 +250,7 @@ Higher-level UI helpers built on top of device tooling. Currently only `AndroidU
 - Launch via `process_control`, including ordered `argv` and environment values
 - Xcode-compatible snapshots via `memgraph`, defaulting to the last launch PID
 - Tracks the returned PID so `memgraph` can reuse it
-- Stop via `pkill --bundle`, which kills the app whether or not this instance launched it
+- Stop via WebDriverAgent first, falling back to `pkill --bundle`
 - Screen capture via `screenshot`
 - Does not currently implement file transfer or Documents-sandbox operations
 

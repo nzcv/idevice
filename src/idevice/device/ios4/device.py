@@ -9,6 +9,8 @@ import tempfile
 from pathlib import Path
 from typing import NoReturn
 
+import wda
+
 from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.base.errors import AppNotInstalledError, DeviceNotFoundError
 from idevice.device.base.runner import SubprocessRunner
@@ -31,6 +33,7 @@ _UDID_PATTERN = re.compile(
     r'UniqueDeviceID["\']?\s*:\s*String\(\s*"([^"\\]+)"\s*\)'
 )
 _WDA_PROCESS_MARKERS = ("webdriveragent", "xctrunner")
+_WDA_PORT = 8100
 
 
 class IOSDevice4Error(RuntimeError):
@@ -49,7 +52,7 @@ class IOSDevice4(DeviceBase):
     * ``process_control`` for launch environment and ordered arguments.
     * ``screenshot`` for screen capture.
     * ``memgraph`` for Xcode-compatible process memory snapshots.
-    * ``pkill --bundle`` for stopping an app by bundle id.
+    * WebDriverAgent, with ``pkill --bundle`` as the stop fallback.
     * ``app_service uninstall`` for lifecycle cleanup.
 
     File transfer and Documents-sandbox operations are intentionally not
@@ -352,14 +355,25 @@ class IOSDevice4(DeviceBase):
             temporary_path.unlink(missing_ok=True)
 
     def stop_app(self, app_id: str | None = None) -> None:
-        """Kill every process of the app, whoever launched it.
+        """Stop the app through WDA, falling back to ``ios4 pkill``.
+
+        A stopped app is not an error. WDA is addressed through
+        :attr:`device_ip` on its standard port when an IP is bound; otherwise
+        the ``wda`` client's ``DEVICE_URL``/localhost default is used.
 
         Raises:
-            IOSDevice4Error: If ``ios4 pkill`` fails, which includes the app
-                not being installed. A stopped app is not an error.
+            IOSDevice4Error: If WDA is unavailable and ``ios4 pkill`` fails,
+                which includes the app not being installed.
         """
         target = self._resolve_app_id(app_id)
         logger.info(f"{_LOG_TAG} Stopping app on iOS device {self.device_id}: {target}")
+        if self._stop_app_via_wda(target):
+            self._clear_last_launch(target)
+            return
+
+        logger.info(
+            f"{_LOG_TAG} Falling back to ios4 pkill for {target} on {self.device_id}"
+        )
         result = self._runner.run(
             self._command("pkill", "--bundle", target), check=False
         )
@@ -369,7 +383,24 @@ class IOSDevice4(DeviceBase):
                 f"returncode={result.returncode}, stdout={result.stdout!r}, "
                 f"stderr={result.stderr!r}"
             )
-        if self._last_launch_app_id == target:
+        self._clear_last_launch(target)
+
+    def _stop_app_via_wda(self, app_id: str) -> bool:
+        """Return whether WDA accepted an app-termination request."""
+        url = f"http://{self.device_ip}:{_WDA_PORT}" if self.device_ip else None
+        try:
+            session = wda.Client(url).session()
+            session.http.post("/wda/apps/terminate", {"bundleId": app_id})
+        except Exception as exc:
+            logger.warning(
+                f"{_LOG_TAG} WDA failed to stop {app_id} on {self.device_id}: {exc}"
+            )
+            return False
+        return True
+
+    def _clear_last_launch(self, app_id: str) -> None:
+        """Clear launch tracking when it belongs to ``app_id``."""
+        if self._last_launch_app_id == app_id:
             self._last_launch_pid = None
             self._last_launch_app_id = ""
 
