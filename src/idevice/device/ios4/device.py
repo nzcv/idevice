@@ -266,8 +266,8 @@ class IOSDevice4(DeviceBase):
             IOSDevice4Error: If process control does not return a PID.
         """
         target = self._resolve_app_id(app_id)
-        # if not self.is_installed(target):
-        #     raise AppNotInstalledError(f"App not installed: {target}")
+        if not self.is_installed(target):
+            raise AppNotInstalledError(f"App not installed: {target}")
 
         command = self._command("process_control")
         if environment:
@@ -390,7 +390,7 @@ class IOSDevice4(DeviceBase):
         url = f"http://{self.device_ip}:{_WDA_PORT}" if self.device_ip else None
         try:
             session = wda.Client(url).session()
-            session.http.post("/wda/apps/terminate", {"bundleId": app_id})
+            session.app_terminate(app_id)
         except Exception as exc:
             logger.warning(
                 f"{_LOG_TAG} WDA failed to stop {app_id} on {self.device_id}: {exc}"

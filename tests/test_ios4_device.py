@@ -286,9 +286,7 @@ def test_stop_uses_wda_first_and_clears_the_tracked_pid(
 
     client.assert_called_once_with(None)
     wda_client.session.assert_called_once_with()
-    wda_session.http.post.assert_called_once_with(
-        "/wda/apps/terminate", {"bundleId": APP_ID}
-    )
+    wda_session.app_terminate.assert_called_once_with(APP_ID)
     ios4_device._runner.run.assert_not_called()
     assert ios4_device.last_launch_pid is None
 
