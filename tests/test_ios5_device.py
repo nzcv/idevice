@@ -20,8 +20,8 @@ from idevice.device.ios5.device import (
 
 APP_ID = "com.example.game"
 IOS4_BINARY = "/opt/ios4"
-UDID = "00008030-000655392E01802E"
-DEVICE_IP = "192.168.1.20"
+UDID = "00000000-0000000000000000"
+DEVICE_IP = "192.0.2.20"
 APP_URL = "file:///private/var/containers/Bundle/Application/AAAA/ExampleGame.app/"
 
 
