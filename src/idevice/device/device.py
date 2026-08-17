@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from enum import Enum
 
 from idevice.device import config
@@ -13,6 +14,7 @@ from idevice.device.dummy.device import DummyDevice
 from idevice.device.ios.device import IOSDevice
 from idevice.device.ios3.device import IOSDevice3
 from idevice.device.ios4.device import IOSDevice4
+from idevice.device.ios5.device import IOSDevice5
 from idevice.device.windows.device import WindowsDevice
 
 logger = logging.getLogger(__name__)
@@ -26,6 +28,7 @@ class Platform(Enum):
     IOS = "_ios"
     IOS3 = "ios"
     IOS4 = "ios4"
+    IOS5 = "ios5"
     ANDROID = "android"
     WINDOWS = "pc"
 
@@ -91,9 +94,9 @@ class Device(metaclass=_DeviceMeta):
         """Create a device instance bound to ``device_id`` for ``platform``.
 
         Args:
-            platform: Target platform (``ios``, ``ios3``, ``ios4``, ``android``
-                or ``windows``), as a :class:`Platform` member or its string
-                value.
+            platform: Target platform (``ios``, ``ios3``, ``ios4``, ``ios5``,
+                ``android`` or ``windows``), as a :class:`Platform` member or
+                its string value.
             device_id: Device id (UDID / serial). Required and non-empty.
             device_ip: Device IP address, or an empty string when not applicable.
             company_name: Windows-only publisher folder under ``%LocalAppData%``.
@@ -110,12 +113,16 @@ class Device(metaclass=_DeviceMeta):
         """
         p = Platform.from_string(platform)
         logger.debug(f"Creating device for platform={p} device_id={device_id}")
-        if p is Platform.IOS4 or os.environ.get("GAUTO_IOS4", "0") == "1":
+        if sys.platform == "darwin" and (p is Platform.IOS5 or os.environ.get("GAUTO_IOS5", "0") == "1"):
+            device: DeviceBase = IOSDevice5(
+                device_id, device_ip=device_ip, package_name=package_name
+            )
+        elif p is Platform.IOS4 or os.environ.get("GAUTO_IOS4", "0") == "1":
             device = IOSDevice4(
                 device_id, device_ip=device_ip, package_name=package_name
             )
         elif p is Platform.IOS:
-            device: DeviceBase = IOSDevice(
+            device = IOSDevice(
                 device_id, device_ip=device_ip, package_name=package_name
             )
         elif p is Platform.IOS3:

@@ -13,6 +13,7 @@ from idevice.device.device import Device, Platform
 from idevice.device.ios.device import IOSDevice
 from idevice.device.ios3.device import IOSDevice3, IOSDevice3Error
 from idevice.device.ios4.device import IOSDevice4, IOSDevice4Error
+from idevice.device.ios5.device import IOSDevice5, IOSDevice5Error
 from idevice.device.windows.device import WindowsDevice
 
 __all__ = [
@@ -30,6 +31,8 @@ __all__ = [
     "IOSDevice3Error",
     "IOSDevice4",
     "IOSDevice4Error",
+    "IOSDevice5",
+    "IOSDevice5Error",
     "Platform",
     "SubprocessRunner",
     "WindowsDevice",

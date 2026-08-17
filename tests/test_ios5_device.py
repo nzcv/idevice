@@ -1,0 +1,778 @@
+"""Unit tests for the devicectl-backed ``IOSDevice5`` lifecycle."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+import pytest
+import requests
+
+from idevice.device.base.device import AppDataPath
+from idevice.device.base.errors import AppNotInstalledError, DeviceNotFoundError
+from idevice.device.base.runner import CommandResult
+from idevice.device.ios5.device import (
+    DevicectlOutcome,
+    IOSDevice5,
+    IOSDevice5Error,
+)
+
+APP_ID = "com.example.game"
+IWDA2_RUNNER_ID = "com.idevice.iwda2.xctrunner"
+IOS4_BINARY = "/opt/ios4"
+UDID = "00008030-000655392E01802E"
+DEVICE_IP = "192.168.1.20"
+APP_URL = "file:///private/var/containers/Bundle/Application/AAAA/ExampleGame.app/"
+RUNNER_URL = "file:///private/var/containers/Bundle/Application/BBBB/iwda2-Runner.app/"
+
+
+@pytest.fixture
+def ios5_device(tmp_path: Path) -> IOSDevice5:
+    """Build an IOSDevice5 with a mocked runner and isolated cache."""
+    with patch("idevice.device.ios5.device.sys.platform", "darwin"):
+        with patch(
+            "idevice.device.ios5.device.shutil.which", return_value="/usr/bin/xcrun"
+        ):
+            device = IOSDevice5(
+                UDID,
+                device_ip=DEVICE_IP,
+                package_name=APP_ID,
+                cache_dir=tmp_path / "cache",
+            )
+    device._runner = MagicMock()
+    return device
+
+
+def outcome(
+    result: dict[str, Any] | None = None,
+    *,
+    returncode: int = 0,
+    error: str = "",
+) -> DevicectlOutcome:
+    """Create a devicectl outcome for mocked ``_run`` calls."""
+    return DevicectlOutcome(
+        returncode=returncode, result=result or {}, error=error
+    )
+
+
+def app_listing(bundle_id: str, url: str) -> DevicectlOutcome:
+    """Create a ``device info apps`` outcome holding one application."""
+    return outcome({"apps": [{"bundleIdentifier": bundle_id, "url": url}]})
+
+
+def response(status_code: int = 200, content: bytes = b"") -> MagicMock:
+    """Create a requests-style response for mocked iwda2 calls."""
+    stub = MagicMock()
+    stub.status_code = status_code
+    stub.content = content
+    stub.text = content.decode("utf-8", "replace")
+    return stub
+
+
+def command_of(mock: MagicMock, index: int) -> list[str]:
+    """Return the devicectl arguments of the ``index``-th ``_run`` call."""
+    return mock.call_args_list[index].args[0]
+
+
+def test_construction_requires_macos(tmp_path: Path) -> None:
+    with patch("idevice.device.ios5.device.sys.platform", "win32"):
+        with pytest.raises(IOSDevice5Error, match="only available on macOS"):
+            IOSDevice5(UDID, cache_dir=tmp_path)
+
+
+def test_construction_requires_xcrun(tmp_path: Path) -> None:
+    with patch("idevice.device.ios5.device.sys.platform", "darwin"):
+        with patch("idevice.device.ios5.device.shutil.which", return_value=None):
+            with pytest.raises(IOSDevice5Error, match="CLI not found"):
+                IOSDevice5(UDID, cache_dir=tmp_path)
+
+
+def test_run_parses_json_document_and_removes_temporary_file(
+    ios5_device: IOSDevice5,
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake_run(command: list[str], **kwargs: Any) -> CommandResult:
+        json_path = Path(command[command.index("--json-output") + 1])
+        json_path.write_text(
+            json.dumps({"info": {}, "result": {"apps": []}}), encoding="utf-8"
+        )
+        seen["command"] = command
+        seen["json_path"] = json_path
+        seen["kwargs"] = kwargs
+        return CommandResult(returncode=0, stdout="", stderr="")
+
+    ios5_device._runner.run = fake_run
+    parsed = ios5_device._run(["device", "info", "apps"], timeout=45)
+
+    assert parsed.succeeded is True
+    assert parsed.result == {"apps": []}
+    assert seen["command"][:2] == ["xcrun", "devicectl"]
+    assert seen["command"][2:5] == ["device", "info", "apps"]
+    assert "--quiet" in seen["command"]
+    assert seen["command"][seen["command"].index("--timeout") + 1] == "45"
+    assert seen["kwargs"] == {"check": False, "timeout": 75}
+    assert not seen["json_path"].exists()
+
+
+def test_run_places_output_options_before_argument_separator(
+    ios5_device: IOSDevice5,
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake_run(command: list[str], **kwargs: Any) -> CommandResult:
+        json_path = Path(command[command.index("--json-output") + 1])
+        json_path.write_text(
+            json.dumps({"info": {}, "result": {"process": {"processIdentifier": 42}}}),
+            encoding="utf-8",
+        )
+        seen["command"] = command
+        return CommandResult(returncode=0, stdout="", stderr="")
+
+    ios5_device._runner.run = fake_run
+    parsed = ios5_device._run(
+        [
+            "device",
+            "process",
+            "launch",
+            "--device",
+            UDID,
+            "--",
+            APP_ID,
+            "--mode",
+            "debug",
+        ]
+    )
+
+    command = seen["command"]
+    separator_index = command.index("--")
+    assert command.index("--quiet") < separator_index
+    assert command.index("--timeout") < separator_index
+    assert command.index("--json-output") < separator_index
+    assert command[separator_index + 1 :] == [APP_ID, "--mode", "debug"]
+    assert parsed.result == {"process": {"processIdentifier": 42}}
+
+
+def test_run_surfaces_nested_coredevice_error(ios5_device: IOSDevice5) -> None:
+    document = {
+        "error": {
+            "code": 4000,
+            "domain": "com.apple.dt.CoreDeviceError",
+            "userInfo": {
+                "NSLocalizedDescription": {"string": "The tunnel was interrupted."},
+                "NSUnderlyingError": {
+                    "error": {
+                        "code": 60,
+                        "domain": "Network.NWError",
+                        "userInfo": {
+                            "NSLocalizedDescription": {"string": "Operation timed out"}
+                        },
+                    }
+                },
+            },
+        }
+    }
+
+    def fake_run(command: list[str], **kwargs: Any) -> CommandResult:
+        Path(command[command.index("--json-output") + 1]).write_text(
+            json.dumps(document), encoding="utf-8"
+        )
+        return CommandResult(returncode=1, stdout="", stderr="")
+
+    ios5_device._runner.run = fake_run
+    parsed = ios5_device._run(["device", "info", "apps"])
+
+    assert parsed.succeeded is False
+    assert parsed.error == "The tunnel was interrupted.: Operation timed out"
+
+
+def test_default_udid_returns_the_first_usb_device() -> None:
+    devices = {
+        "devices": [
+            {
+                "hardwareProperties": {"udid": "over-wifi"},
+                "connectionProperties": {
+                    "tunnelState": "connected",
+                    "transportType": "localNetwork",
+                },
+            },
+            {
+                "hardwareProperties": {"udid": UDID},
+                "connectionProperties": {
+                    "tunnelState": "disconnected",
+                    "transportType": "wired",
+                },
+            },
+            {
+                "hardwareProperties": {"udid": "second-cable"},
+                "connectionProperties": {
+                    "tunnelState": "connected",
+                    "transportType": "wired",
+                },
+            },
+        ]
+    }
+    with patch(
+        "idevice.device.ios5.device._run_devicectl", return_value=outcome(devices)
+    ):
+        assert IOSDevice5.default_udid() == UDID
+
+
+def test_default_udid_rejects_devices_that_are_not_cabled() -> None:
+    devices = {
+        "devices": [
+            {
+                "hardwareProperties": {"udid": "forgotten"},
+                "connectionProperties": {"tunnelState": "unavailable"},
+            },
+            {
+                "hardwareProperties": {"udid": "over-wifi"},
+                "connectionProperties": {
+                    "tunnelState": "connected",
+                    "transportType": "localNetwork",
+                },
+            },
+        ]
+    }
+    with patch(
+        "idevice.device.ios5.device._run_devicectl", return_value=outcome(devices)
+    ):
+        with pytest.raises(DeviceNotFoundError, match="No USB-attached device"):
+            IOSDevice5.default_udid()
+
+
+def test_default_udid_rejects_an_empty_device_list() -> None:
+    with patch(
+        "idevice.device.ios5.device._run_devicectl", return_value=outcome({})
+    ):
+        with pytest.raises(DeviceNotFoundError):
+            IOSDevice5.default_udid()
+
+
+def test_install_caches_the_bundle_id_reported_by_devicectl(
+    ios5_device: IOSDevice5, tmp_path: Path
+) -> None:
+    ipa = tmp_path / "ExampleGame.ipa"
+    ipa.write_bytes(b"ipa")
+    ios5_device._run = MagicMock(
+        return_value=outcome(
+            {
+                "installedApplications": [
+                    {"bundleID": APP_ID, "installationURL": APP_URL}
+                ]
+            }
+        )
+    )
+
+    assert ios5_device.install(ipa) is True
+
+    assert command_of(ios5_device._run, 0) == [
+        "device",
+        "install",
+        "app",
+        "--device",
+        UDID,
+        str(ipa),
+    ]
+    cached = ios5_device._app_cache.get(APP_ID)
+    assert cached is not None
+    assert cached.path == APP_URL
+
+
+def test_install_returns_false_on_a_devicectl_error(
+    ios5_device: IOSDevice5, tmp_path: Path
+) -> None:
+    ipa = tmp_path / "ExampleGame.ipa"
+    ipa.write_bytes(b"ipa")
+    ios5_device._run = MagicMock(
+        return_value=outcome(returncode=1, error="The device was not found.")
+    )
+
+    assert ios5_device.install(ipa, app_id=APP_ID) is False
+    assert ios5_device._app_cache.get(APP_ID) is None
+
+
+def test_install_rejects_missing_package(
+    ios5_device: IOSDevice5, tmp_path: Path
+) -> None:
+    with pytest.raises(FileNotFoundError, match="Package not found"):
+        ios5_device.install(tmp_path / "missing.ipa", app_id=APP_ID)
+
+
+def test_is_installed_matches_only_an_exact_bundle_id(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios5_device._run = MagicMock(
+        return_value=app_listing(f"{APP_ID}.beta", APP_URL)
+    )
+
+    assert ios5_device.is_installed(APP_ID) is False
+    assert command_of(ios5_device._run, 0)[:5] == [
+        "device",
+        "info",
+        "apps",
+        "--device",
+        UDID,
+    ]
+    assert "--bundle-id" in command_of(ios5_device._run, 0)
+
+
+def test_launch_passes_environment_and_ordered_arguments(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios5_device._run = MagicMock(
+        side_effect=[
+            app_listing(APP_ID, APP_URL),
+            outcome({"process": {"processIdentifier": 4815}}),
+        ]
+    )
+
+    ios5_device.launch_app(
+        APP_ID,
+        args=["--mode", "debug", "--label", "foo,bar"],
+        environment={"MallocStackLogging": "1", "FOO": "bar=baz"},
+    )
+
+    assert ios5_device.last_launch_pid == 4815
+    launch = command_of(ios5_device._run, 1)
+    assert launch[:5] == ["device", "process", "launch", "--device", UDID]
+    assert json.loads(launch[launch.index("--environment-variables") + 1]) == {
+        "FOO": "bar=baz",
+        "MallocStackLogging": "1",
+    }
+    assert launch[launch.index("--") + 1 :] == [
+        APP_ID,
+        "--mode",
+        "debug",
+        "--label",
+        "foo,bar",
+    ]
+
+
+def test_launch_rejects_an_app_that_is_not_installed(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios5_device._run = MagicMock(return_value=outcome({"apps": []}))
+
+    with pytest.raises(AppNotInstalledError):
+        ios5_device.launch_app(APP_ID)
+
+
+def test_launch_reports_an_unreachable_device_as_such(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios5_device._run = MagicMock(
+        return_value=outcome(returncode=1, error="The tunnel was interrupted.")
+    )
+
+    with pytest.raises(IOSDevice5Error, match="App listing failed"):
+        ios5_device.launch_app(APP_ID)
+
+
+def test_launch_requires_a_pid_in_the_result(ios5_device: IOSDevice5) -> None:
+    ios5_device._run = MagicMock(
+        side_effect=[app_listing(APP_ID, APP_URL), outcome({"process": {}})]
+    )
+
+    with pytest.raises(IOSDevice5Error, match="returned no PID"):
+        ios5_device.launch_app(APP_ID)
+
+
+def test_stop_app_terminates_only_processes_of_that_bundle(
+    ios5_device: IOSDevice5,
+) -> None:
+    processes = {
+        "runningProcesses": [
+            {"executable": f"{APP_URL}ExampleGame", "processIdentifier": 501},
+            {"executable": f"{RUNNER_URL}iwda2-Runner", "processIdentifier": 502},
+            {"executable": "file:///sbin/launchd", "processIdentifier": 1},
+        ]
+    }
+    ios5_device._run = MagicMock(
+        side_effect=[
+            app_listing(APP_ID, APP_URL),
+            outcome(processes),
+            outcome({}),
+        ]
+    )
+
+    ios5_device.stop_app(APP_ID)
+
+    terminate = command_of(ios5_device._run, 2)
+    assert terminate == [
+        "device",
+        "process",
+        "terminate",
+        "--device",
+        UDID,
+        "--pid",
+        "501",
+        "--kill",
+    ]
+
+
+def test_stop_app_rejects_an_app_that_is_not_installed(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios5_device._run = MagicMock(return_value=outcome({"apps": []}))
+
+    with pytest.raises(AppNotInstalledError):
+        ios5_device.stop_app(APP_ID)
+
+
+def test_host_is_running_detects_the_runner_executable(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios5_device._run = MagicMock(
+        return_value=outcome(
+            {
+                "runningProcesses": [
+                    {"executable": f"{RUNNER_URL}iwda2-Runner", "processIdentifier": 3}
+                ]
+            }
+        )
+    )
+
+    assert ios5_device.host_is_running() is True
+
+
+def test_run_iwda2_launches_the_runner_with_its_server_port(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios5_device._run = MagicMock(
+        side_effect=[
+            app_listing(IWDA2_RUNNER_ID, RUNNER_URL),
+            outcome({"process": {"processIdentifier": 3461}}),
+        ]
+    )
+
+    with patch("idevice.device.ios5.device.requests.get", return_value=response()):
+        ios5_device.run_iwda2(runner_bundle_id=IWDA2_RUNNER_ID).join(timeout=5)
+
+    assert ios5_device.iwda2_startup_error is None
+    assert ios5_device.iwda2_process_id == 3461
+    launch = command_of(ios5_device._run, 1)
+    assert json.loads(launch[launch.index("--environment-variables") + 1]) == {
+        "MAX_SESSION_SECONDS": "0",
+        "SERVER_PORT": "18201",
+        "TARGET_BUNDLE_ID": APP_ID,
+    }
+    assert launch[launch.index("--") + 1 :] == [IWDA2_RUNNER_ID]
+
+
+def test_run_iwda2_records_a_readiness_timeout(ios5_device: IOSDevice5) -> None:
+    ios5_device._run = MagicMock(
+        side_effect=[
+            app_listing(IWDA2_RUNNER_ID, RUNNER_URL),
+            outcome({"process": {"processIdentifier": 3461}}),
+        ]
+    )
+
+    with patch(
+        "idevice.device.ios5.device.requests.get",
+        side_effect=requests.ConnectionError("refused"),
+    ):
+        ios5_device.run_iwda2(
+            runner_bundle_id=IWDA2_RUNNER_ID, ready_timeout=0.05
+        ).join(timeout=5)
+
+    assert isinstance(ios5_device.iwda2_startup_error, IOSDevice5Error)
+    assert "did not become ready" in str(ios5_device.iwda2_startup_error)
+
+
+def test_run_iwda2_rejects_an_uninstalled_runner(ios5_device: IOSDevice5) -> None:
+    ios5_device._run = MagicMock(return_value=outcome({"apps": []}))
+
+    with pytest.raises(AppNotInstalledError):
+        ios5_device.run_iwda2(runner_bundle_id=IWDA2_RUNNER_ID)
+
+
+def test_stop_iwda2_asks_the_runner_to_exit_before_killing_it(
+    ios5_device: IOSDevice5,
+) -> None:
+    lingering = {
+        "runningProcesses": [
+            {"executable": f"{RUNNER_URL}iwda2-Runner", "processIdentifier": 3461}
+        ]
+    }
+    ios5_device._run = MagicMock(
+        side_effect=[outcome(lingering), outcome(lingering), outcome({})]
+    )
+
+    with patch(
+        "idevice.device.ios5.device.requests.get", return_value=response()
+    ) as get:
+        ios5_device.stop_iwda2(timeout=0.05)
+
+    assert get.call_args_list[0].args[0] == f"http://{DEVICE_IP}:18201/api/exit"
+    assert command_of(ios5_device._run, 2)[-3:] == ["--pid", "3461", "--kill"]
+    assert ios5_device.iwda2_process_id is None
+
+
+def test_tap_sends_normalized_coordinates(ios5_device: IOSDevice5) -> None:
+    with patch(
+        "idevice.device.ios5.device.requests.get", return_value=response()
+    ) as get:
+        ios5_device.tap(0.5, 0.75, app_id=APP_ID)
+
+    assert get.call_args.args[0] == f"http://{DEVICE_IP}:18201/api/tap"
+    assert get.call_args.kwargs["params"] == {
+        "x": "0.5",
+        "y": "0.75",
+        "bundleId": APP_ID,
+    }
+
+
+@pytest.mark.parametrize("coordinate", [-0.1, 1.1, True, "0.5"])
+def test_tap_rejects_coordinates_outside_the_unit_square(
+    ios5_device: IOSDevice5, coordinate: Any
+) -> None:
+    with pytest.raises(ValueError, match="normalized coordinate"):
+        ios5_device.tap(coordinate, 0.5)
+
+
+XCODE_26_DEVICE_HELP = """SUBCOMMANDS:
+  copy                    Copy files.
+  info                    Commands that provide information about a device
+  install                 Install content onto a device.
+"""
+
+XCODE_27_DEVICE_HELP = """SUBCOMMANDS:
+  capture                 Capture the device's screen.
+  copy                    Copy files.
+  info                    Commands that provide information about a device
+"""
+
+
+def test_screenshot_uses_ios4_without_devicectl_capture(
+    ios5_device: IOSDevice5, tmp_path: Path
+) -> None:
+    def capture(command: list[str], **_kwargs: Any) -> CommandResult:
+        if command[:4] == ["xcrun", "devicectl", "device", "--help"]:
+            return CommandResult(
+                returncode=0, stdout=XCODE_26_DEVICE_HELP, stderr=""
+            )
+        Path(command[-1]).write_bytes(b"ios4-png")
+        return CommandResult(returncode=0, stdout="", stderr="")
+
+    ios5_device._runner.run.side_effect = capture
+    destination = tmp_path / "shots" / "screen.png"
+
+    with patch(
+        "idevice.device.ios5.device.shutil.which", return_value=IOS4_BINARY
+    ):
+        assert ios5_device.screenshot(destination) is True
+
+    assert destination.read_bytes() == b"ios4-png"
+    ios4_command = ios5_device._runner.run.call_args_list[1].args[0]
+    assert ios4_command[:4] == [IOS4_BINARY, "--udid", UDID, "screenshot"]
+    assert ios5_device._runner.run.call_args_list[1].kwargs == {
+        "check": False,
+        "timeout": 60,
+    }
+
+
+def test_screenshot_uses_ios4_when_devicectl_capture_fails(
+    ios5_device: IOSDevice5, tmp_path: Path
+) -> None:
+    def capture(command: list[str], **_kwargs: Any) -> CommandResult:
+        if command[:4] == ["xcrun", "devicectl", "device", "--help"]:
+            return CommandResult(
+                returncode=0, stdout=XCODE_27_DEVICE_HELP, stderr=""
+            )
+        Path(command[-1]).write_bytes(b"ios4-png")
+        return CommandResult(returncode=0, stdout="", stderr="")
+
+    ios5_device._runner.run.side_effect = capture
+    ios5_device._run = MagicMock(
+        return_value=outcome(returncode=1, error="capture unavailable")
+    )
+    destination = tmp_path / "screen.png"
+
+    with patch(
+        "idevice.device.ios5.device.shutil.which", return_value=IOS4_BINARY
+    ):
+        assert ios5_device.screenshot(destination) is True
+
+    assert destination.read_bytes() == b"ios4-png"
+
+
+def test_screenshot_falls_back_to_iwda2_when_devicectl_and_ios4_fail(
+    ios5_device: IOSDevice5, tmp_path: Path
+) -> None:
+    ios5_device._runner.run.side_effect = [
+        CommandResult(returncode=0, stdout=XCODE_27_DEVICE_HELP, stderr=""),
+        CommandResult(returncode=1, stdout="", stderr="ios4 failed"),
+    ]
+    ios5_device._run = MagicMock(
+        return_value=outcome(returncode=1, error="devicectl failed")
+    )
+    destination = tmp_path / "shots" / "screen.png"
+
+    with patch(
+        "idevice.device.ios5.device.shutil.which", return_value=IOS4_BINARY
+    ):
+        with patch(
+            "idevice.device.ios5.device.requests.get",
+            return_value=response(content=b"iwda2-png"),
+        ) as get:
+            assert ios5_device.screenshot(destination) is True
+
+    assert destination.read_bytes() == b"iwda2-png"
+    assert get.call_args.args[0] == f"http://{DEVICE_IP}:18201/api/screenshot"
+
+
+def test_screenshot_uses_devicectl_capture_when_available(
+    ios5_device: IOSDevice5, tmp_path: Path
+) -> None:
+    ios5_device._runner.run.return_value = CommandResult(
+        returncode=0, stdout=XCODE_27_DEVICE_HELP, stderr=""
+    )
+    destination = tmp_path / "screen.png"
+
+    def fake_run(arguments: list[str], **kwargs: Any) -> DevicectlOutcome:
+        Path(arguments[arguments.index("--destination") + 1]).write_bytes(b"png")
+        return outcome({})
+
+    ios5_device._run = MagicMock(side_effect=fake_run)
+
+    assert ios5_device.screenshot(destination) is True
+    assert destination.read_bytes() == b"png"
+    assert command_of(ios5_device._run, 0)[:3] == ["device", "capture", "screenshot"]
+
+
+def test_capture_memgraph_delegates_to_the_ios4_cli(
+    ios5_device: IOSDevice5, tmp_path: Path
+) -> None:
+    ios5_device._last_launch_pid = 4815
+    destination = tmp_path / "game.memgraph"
+
+    def fake_run(command: list[str], **kwargs: Any) -> CommandResult:
+        Path(command[-1]).write_bytes(b"memgraph")
+        return CommandResult(returncode=0, stdout="", stderr="")
+
+    ios5_device._runner.run = MagicMock(side_effect=fake_run)
+
+    with patch(
+        "idevice.device.ios5.device.shutil.which", return_value=IOS4_BINARY
+    ):
+        assert ios5_device.capture_memgraph(destination) == destination
+
+    assert destination.read_bytes() == b"memgraph"
+    command = ios5_device._runner.run.call_args.args[0]
+    assert command[:5] == [IOS4_BINARY, "--udid", UDID, "memgraph", "4815"]
+
+
+def test_capture_memgraph_reports_a_missing_ios4_cli(
+    ios5_device: IOSDevice5, tmp_path: Path
+) -> None:
+    ios5_device._last_launch_pid = 4815
+
+    with patch("idevice.device.ios5.device.shutil.which", return_value=None):
+        with pytest.raises(IOSDevice5Error, match="capture_memgraph needs"):
+            ios5_device.capture_memgraph(tmp_path / "game.memgraph")
+
+
+def test_push_scopes_the_transfer_to_the_documents_sandbox(
+    ios5_device: IOSDevice5, tmp_path: Path
+) -> None:
+    payload = tmp_path / "save.json"
+    payload.write_text("{}", encoding="utf-8")
+    ios5_device._run = MagicMock(return_value=outcome({}))
+
+    assert ios5_device.documents_push(APP_ID, payload, "saves/save.json") is True
+
+    command = command_of(ios5_device._run, 0)
+    assert command[:3] == ["device", "copy", "to"]
+    assert command[command.index("--domain-type") + 1] == "appDataContainer"
+    assert command[command.index("--domain-identifier") + 1] == APP_ID
+    assert command[command.index("--destination") + 1] == "Documents/saves/save.json"
+
+
+def test_pull_reads_the_container_root_for_local_app_data(
+    ios5_device: IOSDevice5, tmp_path: Path
+) -> None:
+    ios5_device._run = MagicMock(return_value=outcome({}))
+
+    assert ios5_device.pull2(AppDataPath.Local, "Library/Caches", tmp_path / "out")
+
+    command = command_of(ios5_device._run, 0)
+    assert command[:3] == ["device", "copy", "from"]
+    assert command[command.index("--source") + 1] == "Library/Caches"
+
+
+def test_documents_exists_matches_a_listed_entry(ios5_device: IOSDevice5) -> None:
+    ios5_device._run = MagicMock(
+        return_value=outcome({"files": [{"path": "Documents/saves/save.json"}]})
+    )
+
+    assert ios5_device.documents_exists(APP_ID, "saves/save.json") is True
+    command = command_of(ios5_device._run, 0)
+    assert command[command.index("--subdirectory") + 1] == "Documents/saves"
+    assert "--no-recurse" in command
+
+
+def test_ls_lists_the_documents_root_by_default(ios5_device: IOSDevice5) -> None:
+    ios5_device._run = MagicMock(
+        return_value=outcome(
+            {"files": [{"path": "Documents/save.json"}, {"path": "Documents/logs"}]}
+        )
+    )
+
+    assert ios5_device.ls("/", app_id=APP_ID) == [
+        "Documents/save.json",
+        "Documents/logs",
+    ]
+
+    command = command_of(ios5_device._run, 0)
+    assert command[:3] == ["device", "info", "files"]
+    assert command[command.index("--subdirectory") + 1] == "Documents"
+    assert "--no-recurse" in command
+
+
+def test_ls_can_list_the_full_app_container_root(ios5_device: IOSDevice5) -> None:
+    ios5_device._run = MagicMock(
+        return_value=outcome({"files": [{"path": "Documents"}, {"path": "Library"}]})
+    )
+
+    assert ios5_device.ls("/", app_id=APP_ID, documents_only=False) == [
+        "Documents",
+        "Library",
+    ]
+
+    command = command_of(ios5_device._run, 0)
+    assert "--subdirectory" not in command
+
+
+def test_documents_ls_lists_the_documents_root(ios5_device: IOSDevice5) -> None:
+    ios5_device._run = MagicMock(
+        return_value=outcome({"files": [{"path": "Documents/save.json"}]})
+    )
+
+    assert ios5_device.documents_ls(APP_ID, "/") == ["Documents/save.json"]
+
+    command = command_of(ios5_device._run, 0)
+    assert command[command.index("--subdirectory") + 1] == "Documents"
+    assert "--no-recurse" in command
+
+
+def test_ls_reports_a_failed_listing(ios5_device: IOSDevice5) -> None:
+    ios5_device._run = MagicMock(
+        return_value=outcome(returncode=1, error="No such file or directory")
+    )
+
+    with pytest.raises(IOSDevice5Error, match="Could not list"):
+        ios5_device.ls("Documents", app_id=APP_ID)
+
+
+def test_operations_without_a_coredevice_service_are_unsupported(
+    ios5_device: IOSDevice5,
+) -> None:
+    with pytest.raises(NotImplementedError, match="swipe"):
+        ios5_device.swipe(0, 0, 10, 10)
+    with pytest.raises(NotImplementedError, match="documents_rm"):
+        ios5_device.documents_rm(APP_ID, "saves")
+    with pytest.raises(NotImplementedError, match="delete2"):
+        ios5_device.delete2(AppDataPath.Persistent, "saves")

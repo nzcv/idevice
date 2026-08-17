@@ -25,6 +25,7 @@ macOS and HarmonyOS are not implemented yet.
   - **iOS (go-ios):** `ios`
   - **iOS (pymobiledevice3):** `pymobiledevice3` (default: `/opt/ios3/bin/pymobiledevice3` on Unix, `~/ios3/bin/pymobiledevice3.exe` on Windows)
   - **iOS (ios4):** `ios4` (or set `IDEVICE_IOS4_BINARY`); optionally `ideviceinstaller` for installs (or set `IDEVICE_IDEVICEINSTALLER_BINARY`)
+  - **iOS (devicectl):** `xcrun` from Xcode, macOS only (or set `IDEVICE_XCRUN_BINARY`); `ios4` is still needed for `capture_memgraph`
   - **Android:** `adb`
 
 Python packages `pymobiledevice3` and `uiautomator2` are installed automatically with the project (see [Install](#install)). `IOSDevice3` uses the pymobiledevice3 Python library for Documents sandbox access (`documents_*`); other iOS operations go through the CLI.
@@ -55,6 +56,14 @@ device = Device.create(Platform.IOS3, device_id="00000000-0000000000000000", dev
 # iOS via the Rust ios4 lifecycle backend
 device = Device.create(
     "ios4",
+    device_id="00000000-0000000000000000",
+    device_ip="",
+    package_name="com.example.game",
+)
+
+# iOS via Apple's own xcrun devicectl (macOS + Xcode only)
+device = Device.create(
+    "ios5",
     device_id="00000000-0000000000000000",
     device_ip="",
     package_name="com.example.game",
@@ -134,6 +143,34 @@ did not exit immediately but skips HTTP readiness polling. Pass
 `wait_ready=False` to skip polling even when an IP is configured. Inspect
 `device.iwda2_startup_error` after the thread finishes to detect startup errors.
 
+`IOSDevice5` runs the same workflow on Apple's `xcrun devicectl`. The Runner is
+started as an ordinary app because the iwda2 bundle self-boots its own
+`XCTestConfiguration`, so there is no host-side XCTest client and
+`iwda2_process_id` reports the device-side PID:
+
+```python
+from idevice.device.ios5.device import IOSDevice5
+
+game = IOSDevice5(
+    IOSDevice5.default_udid(),  # first USB-attached device
+    device_ip="192.168.1.20",
+    package_name="com.example.game",
+)
+game.run_iwda2().join()  # launches com.idevice.iwda2.xctrunner, polls /api/health
+game.launch_app(
+    "com.example.game",
+    args=["--mode", "debug"],
+    environment={"MallocStackLogging": "1"},
+)
+game.tap(0.5, 0.5, app_id="com.example.game")
+game.screenshot("screen.png")
+snapshot = game.capture_memgraph("trash-dash.memgraph")  # shells out to ios4
+```
+
+`run_iwda2` injects `SERVER_PORT` (default 18201, override with
+`IDEVICE_IWDA2_PORT` or the `iwda2_server_port` argument), `MAX_SESSION_SECONDS=0`
+and, from the bound `package_name`, `TARGET_BUNDLE_ID`.
+
 Android swipe (via `adb shell input swipe`):
 
 ```python
@@ -193,6 +230,15 @@ uv run python examples/ios4_device.py \
   --memgraph game.memgraph \
   --arg=--mode --arg=debug
 
+# iOS (devicectl): install, start iwda2, launch, screenshot
+uv run python examples/ios5_device.py \
+  --udid 00000000-0000000000000000 \
+  --device-ip 192.168.1.20 \
+  --ipa path/to/game.ipa \
+  --app-id com.example.game \
+  --run-iwda2 \
+  --screenshot screen.png
+
 # Install an IPA and exercise sandbox file transfer
 uv run python examples/ios3_device.py \
   --ipa path/to/app.ipa \
@@ -217,18 +263,18 @@ Every platform implementation shares the same interface:
 - `package_name` — default app id set at `Device.create` / `Device.from_env` (`GAUTO_PACKAGE_NAME`)
 - `push(local, remote, app_id=None, documents_only=False)` / `pull(remote, local, app_id=None, documents_only=True)` — host ↔ device file transfer
 - `ls(remote, app_id=None, recursive=False)` — list a remote directory on the device
-- `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox, supporting both files and directories (implemented on `IOSDevice3` and `WindowsDevice`; other platforms raise `NotImplementedError`)
+- `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox, supporting both files and directories (implemented on `IOSDevice3` and `WindowsDevice`, and all but `documents_rm` on `IOSDevice5`; other platforms raise `NotImplementedError`)
 - `swipe(x1, y1, x2, y2, duration_ms=300)` — touch gesture (Android implemented; iOS/Windows raise `NotImplementedError`)
-- `tap(x, y, app_id=None)` — tap a normalized point in `[0, 1]` (currently `IOSDevice4`, via iwda2)
+- `tap(x, y, app_id=None)` — tap a normalized point in `[0, 1]` (`IOSDevice4` and `IOSDevice5`, via iwda2)
 - `screenshot(local)` — capture the screen to a host file
 - `host_is_running()` — whether WebDriverAgent / UIAutomator2 host process is up
-- `run_iwda2(...)` — launch an iwda2 XCTest Runner (currently `IOSDevice4`)
-- `stop_iwda2(graceful=True, timeout=10)` — stop the active iwda2 XCTest Runner (currently `IOSDevice4`)
-- `capture_memgraph(output, pid=None)` — capture a process memory snapshot (currently `IOSDevice4`)
+- `run_iwda2(...)` — launch an iwda2 XCTest Runner (`IOSDevice4` and `IOSDevice5`)
+- `stop_iwda2(graceful=True, timeout=10)` — stop the active iwda2 XCTest Runner (`IOSDevice4` and `IOSDevice5`)
+- `capture_memgraph(output, pid=None)` — capture a process memory snapshot (`IOSDevice4`, and `IOSDevice5` by shelling out to `ios4`)
 
 Use `Device.create(Platform, device_id=…, device_ip="", package_name=…)` or
-construct `IOSDevice`, `IOSDevice3`, `IOSDevice4`, `AndroidDevice`, or
-`WindowsDevice` directly. `Device.from_env` requires `GAUTO_PACKAGE_NAME` on
+construct `IOSDevice`, `IOSDevice3`, `IOSDevice4`, `IOSDevice5`, `AndroidDevice`,
+or `WindowsDevice` directly. `Device.from_env` requires `GAUTO_PACKAGE_NAME` on
 all platforms.
 
 ### `UIAutoBase`
@@ -259,8 +305,26 @@ Higher-level UI helpers built on top of device tooling. Currently only `AndroidU
 - Screen capture via `screenshot`, and `tap` through the running iwda2 Runner over HTTP
 - Does not currently implement file transfer or Documents-sandbox operations
 
-Choose `Platform.IOS`, `Platform.IOS3`, or `Platform.IOS4` depending on which
-CLI you have deployed. The string value for the new backend is `ios4`.
+**`IOSDevice5` (xcrun devicectl)** — the same game lifecycle on Apple's own
+CoreDevice CLI, so it needs macOS with Xcode but no third-party binary:
+
+- Install/uninstall via `device install app` / `device uninstall app`, caching the bundle id devicectl reports
+- Exact bundle-id checks via `device info apps --bundle-id`
+- Launch via `device process launch`, with the environment as a JSON dictionary and `argv` as real positional arguments
+- Stop by resolving the bundle's processes in `device info processes` and terminating each with `device process terminate --kill`
+- App data container transfers via `device copy to` / `device copy from` and listing via `device info files`, including the Documents sandbox
+- Screen capture via `device capture screenshot` on Xcode 27+, falling back first to `ios4` and then to the iwda2 Runner's `/api/screenshot`
+- `run_iwda2` launches the Runner as a normal app, relying on the iwda2 self-boot library; devicectl has no XCTest command
+- `capture_memgraph` shells out to `ios4`: CoreDevice exposes no memory-graph service
+- `documents_rm`, `delete2` and `swipe` raise `NotImplementedError` — CoreDevice has no file-removal or touch-injection service
+
+Every command is parsed from devicectl's JSON output, the only interface Apple
+guarantees to keep stable, and errors surface as the flattened
+`NSLocalizedDescription` chain.
+
+Choose `Platform.IOS`, `Platform.IOS3`, `Platform.IOS4`, or `Platform.IOS5`
+depending on which CLI you have deployed. The string values are `ios4` and
+`ios5`.
 
 ## Host orchestration (`idevice.host`)
 
@@ -323,8 +387,10 @@ Environment variables override default binary paths:
 |----------|---------|---------|
 | `IDEVICE_IOS_BINARY` | `ios` | `IOSDevice` |
 | `IDEVICE_IOS3_BINARY` | `/opt/ios3/bin/pymobiledevice3` (Unix) / `~/ios3/bin/pymobiledevice3.exe` (Windows) | `IOSDevice3` |
-| `IDEVICE_IOS4_BINARY` | `ios4` (`ios4.exe` on Windows) | `IOSDevice4` |
+| `IDEVICE_IOS4_BINARY` | `ios4` (`ios4.exe` on Windows) | `IOSDevice4`, `IOSDevice5.capture_memgraph` |
 | `IDEVICE_IDEVICEINSTALLER_BINARY` | `ideviceinstaller` (`ideviceinstaller.exe` on Windows) | `IOSDevice4.install` (falls back to `ios4` when missing) |
+| `IDEVICE_XCRUN_BINARY` | `xcrun` | `IOSDevice5` |
+| `IDEVICE_IWDA2_PORT` | `18201` | `IOSDevice5` iwda2 HTTP port |
 | `IDEVICE_ADB_BINARY` | `adb` | `AndroidDevice`, `AndroidUIAuto` |
 | `IDEVICE_POWERSHELL_BINARY` | `powershell` | `WindowsDevice` |
 

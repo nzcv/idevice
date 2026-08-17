@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 DEFAULT_APP_RETENTION_DAYS = 1
+DEFAULT_IWDA2_PORT = 18201
 
 
 def ios_binary() -> str:
@@ -27,6 +28,21 @@ def ios4_binary() -> str:
     """Return the ios4 CLI binary path."""
     default = "ios4.exe" if sys.platform == "win32" else "ios4"
     return os.environ.get("IDEVICE_IOS4_BINARY", default)
+
+
+def xcrun_binary() -> str:
+    """Return the ``xcrun`` CLI path used to reach Apple's ``devicectl``."""
+    return os.environ.get("IDEVICE_XCRUN_BINARY", "xcrun")
+
+
+def iwda2_port() -> int:
+    """Return the iwda2 Runner HTTP port (``IDEVICE_IWDA2_PORT``).
+
+    Must match the ``SERVER_PORT`` the Runner listens on, which defaults to
+    :data:`DEFAULT_IWDA2_PORT`.
+    """
+    raw = os.environ.get("IDEVICE_IWDA2_PORT")
+    return int(raw) if raw else DEFAULT_IWDA2_PORT
 
 
 def ideviceinstaller_binary() -> str:
