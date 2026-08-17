@@ -276,6 +276,7 @@ def test_stop_uses_wda_first_and_clears_the_tracked_pid(
     ios4_device._last_launch_pid = 4815
     ios4_device._last_launch_app_id = APP_ID
     wda_session = MagicMock()
+    wda_session.__enter__.return_value = wda_session
     wda_client = MagicMock()
     wda_client.session.return_value = wda_session
 
@@ -287,6 +288,7 @@ def test_stop_uses_wda_first_and_clears_the_tracked_pid(
     client.assert_called_once_with(None)
     wda_client.session.assert_called_once_with()
     wda_session.app_terminate.assert_called_once_with(APP_ID)
+    wda_session.__exit__.assert_called_once_with(None, None, None)
     ios4_device._runner.run.assert_not_called()
     assert ios4_device.last_launch_pid is None
 
@@ -320,18 +322,40 @@ def test_stop_falls_back_to_ios4_when_wda_fails(
     assert ios4_device.last_launch_pid is None
 
 
+def test_stop_closes_wda_session_when_termination_fails(
+    ios4_device: IOSDevice4,
+) -> None:
+    wda_session = MagicMock()
+    wda_session.__enter__.return_value = wda_session
+    wda_session.app_terminate.side_effect = RuntimeError("termination failed")
+    wda_client = MagicMock()
+    wda_client.session.return_value = wda_session
+    ios4_device._runner.run.return_value = result(stdout="Killed 4815 (Game)\n")
+
+    with patch("idevice.device.ios4.device.wda.Client", return_value=wda_client):
+        ios4_device.stop_app()
+
+    assert wda_session.__exit__.call_count == 1
+    ios4_device._runner.run.assert_called_once_with(
+        [BINARY, "--udid", UDID, "pkill", "--bundle", APP_ID],
+        check=False,
+    )
+
+
 def test_stop_keeps_the_tracked_pid_of_another_app(
     ios4_device: IOSDevice4,
 ) -> None:
     ios4_device._last_launch_pid = 4815
     ios4_device._last_launch_app_id = APP_ID
     wda_session = MagicMock()
+    wda_session.__enter__.return_value = wda_session
     wda_client = MagicMock()
     wda_client.session.return_value = wda_session
 
     with patch("idevice.device.ios4.device.wda.Client", return_value=wda_client):
         ios4_device.stop_app("com.example.other")
 
+    wda_session.__exit__.assert_called_once_with(None, None, None)
     assert ios4_device.last_launch_pid == 4815
 
 
@@ -366,6 +390,68 @@ def test_screenshot_uses_the_ios4_screenshot_service(
         [BINARY, "--udid", UDID, "screenshot", str(output)], check=False
     )
     assert output.read_bytes() == b"\x89PNG"
+
+
+def test_tap_uses_wda_normalized_coordinates_and_closes_session(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._device_ip = "192.0.2.10"
+    wda_session = MagicMock()
+    wda_session.__enter__.return_value = wda_session
+    wda_client = MagicMock()
+    wda_client.session.return_value = wda_session
+
+    with patch(
+        "idevice.device.ios4.device.wda.Client", return_value=wda_client
+    ) as client:
+        ios4_device.tap(0, 1, app_id=APP_ID)
+
+    client.assert_called_once_with("http://192.0.2.10:8100")
+    wda_client.session.assert_called_once_with()
+    wda_session.click.assert_called_once_with(0.0, 1.0)
+    wda_session.__exit__.assert_called_once_with(None, None, None)
+    ios4_device._runner.run.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("x", "y", "coordinate"),
+    [
+        (-0.1, 0.5, "x"),
+        (1.1, 0.5, "x"),
+        (0.5, -0.1, "y"),
+        (0.5, 1.1, "y"),
+        (True, 0.5, "x"),
+    ],
+)
+def test_tap_rejects_invalid_normalized_coordinates(
+    ios4_device: IOSDevice4,
+    x: float,
+    y: float,
+    coordinate: str,
+) -> None:
+    with patch("idevice.device.ios4.device.wda.Client") as client:
+        with pytest.raises(
+            ValueError, match=rf"{coordinate} must be a normalized coordinate"
+        ):
+            ios4_device.tap(x, y)
+
+    client.assert_not_called()
+
+
+def test_tap_closes_session_and_wraps_wda_failure(
+    ios4_device: IOSDevice4,
+) -> None:
+    wda_session = MagicMock()
+    wda_session.__enter__.return_value = wda_session
+    wda_session.click.side_effect = RuntimeError("tap failed")
+    wda_client = MagicMock()
+    wda_client.session.return_value = wda_session
+
+    with patch("idevice.device.ios4.device.wda.Client", return_value=wda_client):
+        with pytest.raises(IOSDevice4Error, match="WDA failed to tap"):
+            ios4_device.tap(0.5, 0.25)
+
+    assert wda_session.__exit__.call_count == 1
 
 
 def test_argument_and_environment_validation() -> None:

@@ -389,8 +389,8 @@ class IOSDevice4(DeviceBase):
         """Return whether WDA accepted an app-termination request."""
         url = f"http://{self.device_ip}:{_WDA_PORT}" if self.device_ip else None
         try:
-            session = wda.Client(url).session()
-            session.app_terminate(app_id)
+            with wda.Client(url).session() as session:
+                session.app_terminate(app_id)
         except Exception as exc:
             logger.warning(
                 f"{_LOG_TAG} WDA failed to stop {app_id} on {self.device_id}: {exc}"
@@ -428,6 +428,43 @@ class IOSDevice4(DeviceBase):
             self._command("screenshot", str(local_path)), check=False
         )
         return result.returncode == 0 and local_path.exists()
+
+    def tap(self, x: float, y: float, *, app_id: str | None = None) -> None:
+        """Tap a normalized screen point through WebDriverAgent.
+
+        Args:
+            x: Horizontal position in ``[0, 1]``.
+            y: Vertical position in ``[0, 1]``.
+            app_id: Optional foreground bundle id used for log context. WDA
+                taps are screen-relative and do not require the bundle id.
+
+        Raises:
+            ValueError: If ``x`` or ``y`` is not a number in ``[0, 1]``.
+            IOSDevice4Error: If WDA does not accept the tap.
+        """
+        self._validate_normalized_coordinate(x, "x")
+        self._validate_normalized_coordinate(y, "y")
+        url = f"http://{self.device_ip}:{_WDA_PORT}" if self.device_ip else None
+        app_context = f" for {app_id}" if app_id else ""
+        logger.info(
+            f"{_LOG_TAG} Tapping ({x}, {y}) on {self.device_id}{app_context}"
+        )
+        try:
+            with wda.Client(url).session() as session:
+                session.click(float(x), float(y))
+        except Exception as exc:
+            raise IOSDevice4Error(
+                f"{_LOG_TAG} WDA failed to tap ({x}, {y}) on "
+                f"{self.device_id}{app_context}: {exc}"
+            ) from exc
+
+    @staticmethod
+    def _validate_normalized_coordinate(value: float, name: str) -> None:
+        """Validate one normalized tap coordinate."""
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{name} must be a normalized coordinate in [0, 1]")
+        if not 0.0 <= value <= 1.0:
+            raise ValueError(f"{name} must be a normalized coordinate in [0, 1]")
 
     def _unsupported(self, operation: str) -> NoReturn:
         raise NotImplementedError(

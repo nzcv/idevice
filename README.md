@@ -216,7 +216,7 @@ Every platform implementation shares the same interface:
 - `ls(remote, app_id=None, recursive=False)` — list a remote directory on the device
 - `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox, supporting both files and directories (implemented on `IOSDevice3` and `WindowsDevice`, and all but `documents_rm` on `IOSDevice5`; other platforms raise `NotImplementedError`)
 - `swipe(x1, y1, x2, y2, duration_ms=300)` — touch gesture (Android implemented; iOS/Windows raise `NotImplementedError`)
-- `tap(x, y, app_id=None)` — optional touch input; currently unsupported by the built-in backends
+- `tap(x, y, app_id=None)` — normalized touch input, implemented by `IOSDevice4` through WebDriverAgent
 - `screenshot(local)` — capture the screen to a host file
 - `host_is_running()` — whether WebDriverAgent / UIAutomator2 host process is up
 - `capture_memgraph(output, pid=None)` — capture a process memory snapshot (`IOSDevice4`, and `IOSDevice5` by shelling out to `ios4`)
@@ -251,6 +251,7 @@ Higher-level UI helpers built on top of device tooling. Currently only `AndroidU
 - Xcode-compatible snapshots via `memgraph`, defaulting to the last launch PID
 - Tracks the returned PID so `memgraph` can reuse it
 - Stop via WebDriverAgent first, falling back to `pkill --bundle`
+- Normalized screen taps via WebDriverAgent
 - Screen capture via `screenshot`
 - Does not currently implement file transfer or Documents-sandbox operations
 
