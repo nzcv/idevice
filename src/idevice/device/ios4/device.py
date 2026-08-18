@@ -1,6 +1,7 @@
 """iOS game installation and launch via the Rust ``ios4`` CLI."""
 
 from __future__ import annotations
+
 import logging
 import re
 import shutil
@@ -9,6 +10,7 @@ import threading
 import time
 from pathlib import Path
 from typing import NoReturn
+
 import wda
 
 from idevice.device.base.device import AppDataPath, DeviceBase
@@ -377,11 +379,16 @@ class IOSDevice4(DeviceBase):
         """Return the bound WDA base URL, or ``None`` for the client default."""
         return f"http://{self.device_ip}:{_WDA_PORT}" if self.device_ip else None
 
-    def launch(self, app_id: str) -> None:
+    def launch(self, app_id: str | None = None) -> None:
         """Launch an app directly through the ios4 ``process_control`` command.
 
-        Unlike :meth:`launch_app`, this lower-level operation uses
-        :command:`process_control` and reports the launch PID if available.
+        Unlike :meth:`launch_app`, this lower-level operation does not use
+        WebDriverAgent and accepts no launch arguments.
+
+        It also does not read back the launch PID, so :attr:`last_launch_pid`
+        keeps whatever value an earlier :meth:`launch_app` recorded. Pass an
+        explicit ``pid`` to :meth:`capture_memgraph` after this call; the
+        retained PID may belong to a different app.
 
         Args:
             app_id: Bundle identifier to launch. When omitted or empty, uses
@@ -389,10 +396,14 @@ class IOSDevice4(DeviceBase):
 
         Raises:
             ValueError: If both ``app_id`` and :attr:`package_name` are empty.
-            IOSDevice4Error: If ios4 does not return a launch PID.
+            CommandExecutionError: If the ios4 command fails.
         """
-        command = self._command("process_control", app_id)
-        self._runner.run(command)
+        target = self._resolve_app_id(app_id)
+        logger.info(
+            f"{_LOG_TAG} Launching {target} through process_control on "
+            f"{self.device_id}"
+        )
+        self._runner.run(self._command("process_control", target))
 
     def capture_memgraph(
         self,
