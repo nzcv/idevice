@@ -563,3 +563,16 @@ class DeviceBase(ABC):
             FileNotFoundError: When a required install/cache entry is missing.
         """
         raise NotImplementedError
+
+    def launch_wda(self, bundle_id: str) -> None:
+        """Launch the WDA/UIAutomator2 service on the bound device.
+
+        Args:
+            bundle_id: The bundle identifier (app id / package name) to launch
+                WDA/UIAutomator2 for. When omitted, implementations may use the
+                bound :attr:`package_name`.
+        """
+        del bundle_id
+        raise NotImplementedError(
+            f"launch_wda is not supported on {self.platform} devices"
+        )
