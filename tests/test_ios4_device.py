@@ -597,6 +597,193 @@ def test_tap_closes_session_and_wraps_wda_failure(
     assert wda_session.__exit__.call_count == 1
 
 
+def test_dismiss_message_popup_clicks_known_button_when_alert_is_present(
+    ios4_device: IOSDevice4,
+) -> None:
+    wda_session = MagicMock()
+    wda_session.__enter__.return_value = wda_session
+    wda_alert = MagicMock()
+    wda_alert.exists.return_value = True
+    wda_session.alert = wda_alert
+
+    allow_button = MagicMock()
+    allow_button.exists.return_value = True
+    close_button = MagicMock()
+    close_button.exists.return_value = False
+
+    def selector(**kwargs: object) -> MagicMock:
+        if kwargs.get("text") == "Allow":
+            return allow_button
+        if kwargs.get("text") == "取消":
+            return close_button
+        return MagicMock()
+
+    wda_session.side_effect = selector
+    wda_client = MagicMock()
+    wda_client.session.return_value = wda_session
+
+    with patch(
+        "idevice.device.ios4.device.wda.Client", return_value=wda_client
+    ) as client:
+        assert ios4_device.dismiss_message_popup(
+            button_labels=["Allow", "取消"], timeout=0.1
+        ) is True
+
+    client.assert_called_once_with(None)
+    wda_client.session.assert_called_once_with()
+    wda_session.__exit__.assert_called_once_with(None, None, None)
+    allow_button.click.assert_called_once_with()
+    close_button.click.assert_not_called()
+
+
+def test_dismiss_message_popup_clicks_network_button_by_default_labels(
+    ios4_device: IOSDevice4,
+) -> None:
+    wda_session = MagicMock()
+    wda_session.__enter__.return_value = wda_session
+    wda_alert = MagicMock()
+    wda_alert.exists.return_value = True
+    wda_session.alert = wda_alert
+
+    network_button = MagicMock()
+    network_button.exists.return_value = True
+    allow_button = MagicMock()
+    allow_button.exists.return_value = True
+    other_button = MagicMock()
+    other_button.exists.return_value = False
+
+    def any_button(**_: object) -> MagicMock:
+        return other_button
+
+    def selector(**kwargs: object) -> MagicMock:
+        if kwargs.get("text") == "Allow Access to Local Network":
+            return network_button
+        if kwargs.get("text") == "允许":
+            return allow_button
+        return any_button(**kwargs)
+
+    wda_session.side_effect = selector
+    wda_client = MagicMock()
+    wda_client.session.return_value = wda_session
+
+    with patch(
+        "idevice.device.ios4.device.wda.Client", return_value=wda_client
+    ) as client:
+        assert ios4_device.dismiss_message_popup(timeout=0.1) is True
+
+    client.assert_called_once_with(None)
+    wda_client.session.assert_called_once_with()
+    wda_session.__exit__.assert_called_once_with(None, None, None)
+    network_button.click.assert_called_once_with()
+    allow_button.click.assert_not_called()
+
+
+def test_dismiss_message_popup_returns_false_when_alert_not_present(
+    ios4_device: IOSDevice4,
+) -> None:
+    wda_session = MagicMock()
+    wda_session.__enter__.return_value = wda_session
+    wda_alert = MagicMock()
+    wda_alert.exists.return_value = False
+    wda_session.alert = wda_alert
+
+    wda_client = MagicMock()
+    wda_client.session.return_value = wda_session
+
+    with patch(
+        "idevice.device.ios4.device.wda.Client", return_value=wda_client
+    ) as client:
+        assert ios4_device.dismiss_message_popup(button_labels=["OK"]) is False
+
+    client.assert_called_once_with(None)
+    wda_client.session.assert_called_once_with()
+    wda_session.__exit__.assert_called_once_with(None, None, None)
+
+
+def test_dismiss_message_popup_raises_on_wda_error(
+    ios4_device: IOSDevice4,
+) -> None:
+    with patch(
+        "idevice.device.ios4.device.wda.Client",
+        side_effect=RuntimeError("wda unreachable"),
+    ) as client:
+        with pytest.raises(IOSDevice4Error, match="failed to handle message popup"):
+            ios4_device.dismiss_message_popup(button_labels=["OK"])
+
+    client.assert_called_once_with(None)
+
+
+def test_dismiss_message_popup_rejects_empty_labels() -> None:
+    with pytest.raises(ValueError, match="at least one button label is required"):
+        IOSDevice4._normalize_message_popup_labels(())
+
+
+def test_start_message_popup_handler_rejects_empty_labels(
+    ios4_device: IOSDevice4,
+) -> None:
+    with pytest.raises(ValueError, match="at least one button label is required"):
+        ios4_device.start_message_popup_handler(button_labels=[])
+
+
+def test_start_message_popup_handler_ignores_duplicate_call_when_running(
+    ios4_device: IOSDevice4,
+) -> None:
+    running_thread = MagicMock()
+    running_thread.is_alive.return_value = True
+    ios4_device._message_popup_thread = running_thread
+
+    with patch(
+        "idevice.device.ios4.device.threading.Thread", return_value=running_thread
+    ) as thread_factory:
+        ios4_device.start_message_popup_handler(button_labels=["OK"])
+
+    thread_factory.assert_not_called()
+    assert ios4_device._message_popup_thread is running_thread
+
+
+def test_start_message_popup_handler_requires_positive_parameters(
+    ios4_device: IOSDevice4,
+) -> None:
+    with pytest.raises(ValueError, match="interval must be a positive number"):
+        ios4_device.start_message_popup_handler(interval=0)
+
+    with pytest.raises(ValueError, match="timeout must be a positive number"):
+        ios4_device.start_message_popup_handler(timeout=0)
+
+
+def test_start_message_popup_handler_starts_background_thread(
+    ios4_device: IOSDevice4,
+) -> None:
+    thread = MagicMock()
+    thread.is_alive.return_value = False
+
+    with patch(
+        "idevice.device.ios4.device.threading.Thread", return_value=thread
+    ) as thread_factory:
+        ios4_device.start_message_popup_handler(button_labels=["OK"], interval=0.2, timeout=0.3)
+
+    thread_factory.assert_called_once()
+    args = thread_factory.call_args.kwargs
+    assert args["target"] is ios4_device._run_message_popup_handler
+    assert args["args"] == (("OK",), 0.2, 0.3)
+    thread.start.assert_called_once()
+
+
+def test_stop_message_popup_handler_marks_event_and_joins_thread(
+    ios4_device: IOSDevice4,
+) -> None:
+    thread = MagicMock()
+    thread.is_alive.return_value = True
+
+    with patch("idevice.device.ios4.device.threading.Thread", return_value=thread):
+        ios4_device.start_message_popup_handler(button_labels=["OK"])
+
+    ios4_device.stop_message_popup_handler()
+
+    thread.join.assert_called_once_with(timeout=2.0)
+    assert ios4_device._message_popup_stop_event.is_set()
+
+
 def test_argument_and_environment_validation() -> None:
     assert IOSDevice4._encode_launch_arguments(["foo,bar", r"C:\tmp"]) == (
         r"foo\,bar,C:\\tmp"

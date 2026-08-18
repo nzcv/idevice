@@ -6,6 +6,7 @@ import logging
 import re
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 from typing import NoReturn
 
@@ -34,6 +35,25 @@ _UDID_PATTERN = re.compile(
 )
 _WDA_PROCESS_MARKERS = ("webdriveragent", "xctrunner")
 _WDA_PORT = 8100
+_POPUP_BUTTON_LABELS = (
+    "Allow",
+    "Allow Once",
+    "Allow While Using App",
+    "Allow Access",
+    "Allow Access to Local Network",
+    "Allow Access to Network",
+    "允许访问",
+    "允许访问本地网络",
+    "允许",
+    "同意",
+    "确定",
+    "重试",
+    "不允许",
+    "OK",
+    "Cancel",
+    "取消",
+    "稍后",
+)
 
 
 class IOSDevice4Error(RuntimeError):
@@ -78,6 +98,10 @@ class IOSDevice4(DeviceBase):
         self._app_cache = InstalledAppCache(device_id, cache_dir=cache_dir)
         self._last_launch_pid: int | None = None
         self._last_launch_app_id = ""
+        self._message_popup_stop_event = threading.Event()
+        self._message_popup_stop_event.set()
+        self._message_popup_thread: threading.Thread | None = None
+        self._message_popup_lock = threading.Lock()
 
         if self._resolve_binary(self._binary) is None:
             logger.error(f"{_LOG_TAG} `{self._binary}` CLI not found")
@@ -554,6 +578,200 @@ class IOSDevice4(DeviceBase):
                 f"{_LOG_TAG} WDA failed to tap ({x}, {y}) on "
                 f"{self.device_id}{app_context}: {exc}"
             ) from exc
+
+    def start_message_popup_handler(
+        self,
+        *,
+        button_labels: tuple[str, ...] | list[str] | None = None,
+        interval: float = 1.0,
+        timeout: float = 1.0,
+    ) -> None:
+        """Start a background thread to auto-dismiss message popups.
+
+        Args:
+            button_labels: Labels tried per popup. Defaults to built-in labels.
+            interval: Seconds between each scan.
+            timeout: Per-button/alert timeout passed to WDA.
+        """
+        if interval <= 0:
+            raise ValueError("interval must be a positive number")
+        if timeout <= 0:
+            raise ValueError("timeout must be a positive number")
+
+        labels = self._normalize_message_popup_labels(button_labels)
+
+        with self._message_popup_lock:
+            if (
+                self._message_popup_thread is not None
+                and self._message_popup_thread.is_alive()
+            ):
+                return
+
+            self._message_popup_stop_event.clear()
+            self._message_popup_thread = threading.Thread(
+                target=self._run_message_popup_handler,
+                args=(labels, interval, timeout),
+                daemon=True,
+            )
+            self._message_popup_thread.start()
+
+    def stop_message_popup_handler(self) -> None:
+        """Stop the background popup handler thread."""
+        with self._message_popup_lock:
+            thread = self._message_popup_thread
+            self._message_popup_stop_event.set()
+            self._message_popup_thread = None
+
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=2.0)
+
+    def _run_message_popup_handler(
+        self,
+        labels: tuple[str, ...],
+        interval: float,
+        timeout: float,
+    ) -> None:
+        try:
+            session = wda.Client(self._wda_url()).session()
+        except Exception as exc:
+            logger.debug(
+                f"{_LOG_TAG} popup handler stopped due to WDA error on "
+                f"{self.device_id}: {exc}"
+            )
+            return
+
+        try:
+            while not self._message_popup_stop_event.is_set():
+                try:
+                    self._dismiss_message_popup_with_session(session, labels, timeout)
+                except Exception:
+                    logger.debug(
+                        f"{_LOG_TAG} popup handler ignored transient WDA error "
+                        f"on {self.device_id}"
+                    )
+                if self._message_popup_stop_event.wait(interval):
+                    break
+        finally:
+            self._close_wda_session(session)
+
+    def _dismiss_message_popup_with_session(
+        self, session: wda.Client, labels: tuple[str, ...], timeout: float
+    ) -> bool:
+        """Try to dismiss one popup using a single WDA session."""
+        alert = getattr(session, "alert", None)
+        if alert is None or not self._exists_with_timeout(alert, timeout):
+            return False
+
+        for label in labels:
+            if self._tap_button_if_present(session, label, timeout):
+                logger.info(
+                    f"{_LOG_TAG} Dismissed message popup on "
+                    f"{self.device_id} using button={label!r}"
+                )
+                return True
+        return False
+
+    def dismiss_message_popup(
+        self,
+        *,
+        button_labels: tuple[str, ...] | list[str] | None = None,
+        timeout: float = 1.0,
+    ) -> bool:
+        """Dismiss the topmost message popup via WDA alert controls.
+
+        Args:
+            button_labels: Labels tried in order. Defaults to a built-in set
+                that covers common iOS and Chinese popups.
+            timeout: Per-element check timeout for alert/button presence.
+
+        Returns:
+            bool: ``True`` when a button is clicked.
+        """
+        if timeout <= 0:
+            raise ValueError("timeout must be a positive number")
+
+        labels = self._normalize_message_popup_labels(button_labels)
+
+        try:
+            with wda.Client(self._wda_url()).session() as session:
+                return self._dismiss_message_popup_with_session(
+                    session, labels, timeout
+                )
+        except Exception as exc:
+            raise IOSDevice4Error(
+                f"{_LOG_TAG} WDA failed to handle message popup on "
+                f"{self.device_id}: {exc}"
+            ) from exc
+
+    @staticmethod
+    def _normalize_message_popup_labels(
+        button_labels: tuple[str, ...] | list[str] | None,
+    ) -> tuple[str, ...]:
+        """Return validated popup button labels for handler/manual dismiss."""
+        labels = button_labels if button_labels is not None else _POPUP_BUTTON_LABELS
+        normalized = []
+        seen = set[str]()
+        for label in labels:
+            if not label or label in seen:
+                continue
+            normalized.append(label)
+            seen.add(label)
+        normalized = tuple(normalized)
+        if not normalized:
+            raise ValueError("at least one button label is required")
+        return normalized
+
+    @staticmethod
+    def _close_wda_session(session: object | None) -> None:
+        """Close a WDA session created manually in a background thread."""
+        if session is None:
+            return
+        exit_method = getattr(session, "__exit__", None)
+        if callable(exit_method):
+            try:
+                exit_method(None, None, None)
+                return
+            except Exception:
+                pass
+        close_method = getattr(session, "close", None)
+        if callable(close_method):
+            close_method()
+
+    @staticmethod
+    def _tap_button_if_present(session: wda.Client, label: str, timeout: float) -> bool:
+        """Return ``True`` when a button named ``label`` exists and is clicked."""
+        button = session(text=label)
+        return IOSDevice4._tap_if_exists(button, timeout)
+
+    @staticmethod
+    def _tap_if_exists(element: object, timeout: float) -> bool:
+        exists = getattr(element, "exists", None)
+        if not callable(exists):
+            return False
+
+        try:
+            present = exists(timeout=timeout)
+        except TypeError:
+            present = exists()
+        if not present:
+            return False
+
+        click = getattr(element, "click", None)
+        if not callable(click):
+            return False
+        click()
+        return True
+
+    @staticmethod
+    def _exists_with_timeout(element: object, timeout: float) -> bool:
+        exists = getattr(element, "exists", None)
+        if not callable(exists):
+            return False
+
+        try:
+            return bool(exists(timeout=timeout))
+        except TypeError:
+            return bool(exists())
 
     @staticmethod
     def _validate_normalized_coordinate(value: float, name: str) -> None:
