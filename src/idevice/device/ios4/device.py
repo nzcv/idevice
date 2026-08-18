@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import posixpath
 import re
 import shutil
 import tempfile
@@ -15,7 +16,7 @@ import wda
 
 from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.base.errors import AppNotInstalledError, DeviceNotFoundError
-from idevice.device.base.runner import SubprocessRunner
+from idevice.device.base.runner import CommandResult, SubprocessRunner
 from idevice.device.cache import InstalledAppCache, InstalledAppInfo
 from idevice.device.config import device_id as env_device_id
 from idevice.device.config import device_ip as env_device_ip
@@ -31,6 +32,11 @@ _INSTALL_SUCCESS_MARKERS = (
     "install - complete",
 )
 _PID_PATTERN = re.compile(r"(?m)^PID:\s*(\d+)\s*$")
+_DOCUMENTS_ROOT = "/Documents"
+_DOCUMENTS_DIR_IFMT = "S_IFDIR"
+_DOCUMENTS_FILE_IFMT = "S_IFREG"
+_DOCUMENTS_IFMT_PATTERN = re.compile(r'st_ifmt:\s*"(\w+)"')
+_DOCUMENTS_LIST_ENTRY_PATTERN = re.compile(r'^\s*"((?:[^"\\]|\\.)*)",?\s*$')
 _UDID_PATTERN = re.compile(
     r'UniqueDeviceID["\']?\s*:\s*String\(\s*"([^"\\]+)"\s*\)'
 )
@@ -81,10 +87,11 @@ class IOSDevice4(DeviceBase):
     * ``memgraph`` for Xcode-compatible process memory snapshots.
     * WebDriverAgent, with ``pkill --bundle`` as the stop fallback.
     * ``app_service uninstall`` for lifecycle cleanup.
+    * ``afc --documents`` for the app Documents sandbox (``documents_*``).
 
-    File transfer and Documents-sandbox operations are intentionally not
-    implemented because the ios4 backend currently focuses on the game
-    installation and process-launch workflow.
+    Generic file transfer (``push`` / ``pull`` / ``ls``) outside the Documents
+    sandbox is intentionally not implemented because the ios4 backend
+    currently focuses on the game installation and process-launch workflow.
     """
 
     def __init__(
@@ -835,29 +842,237 @@ class IOSDevice4(DeviceBase):
         del remote, app_id, recursive
         self._unsupported("ls")
 
+    @staticmethod
+    def _require_app_and_remote(app_id: str, remote: str) -> None:
+        """Validate the arguments shared by the Documents helpers."""
+        if not app_id:
+            raise ValueError("app_id is required and must be a non-empty string")
+        if not remote:
+            raise ValueError("remote is required and must be a non-empty string")
+
+    @staticmethod
+    def _documents_path(remote: str) -> str:
+        """Resolve ``remote`` to an absolute path under the vended Documents dir.
+
+        ``ios4 afc --documents`` can only reach files under ``/Documents``, so
+        ``remote`` is always interpreted relative to that root: leading
+        separators are stripped instead of escaping the sandbox, and ``..``
+        segments are rejected.
+        """
+        rel = remote.strip().replace("\\", "/").lstrip("/")
+        parts = [part for part in rel.split("/") if part and part != "."]
+        if any(part == ".." for part in parts):
+            raise ValueError(f"remote path must not contain '..': {remote}")
+        return posixpath.join(_DOCUMENTS_ROOT, *parts)
+
+    def _documents_command(self, app_id: str, *arguments: str) -> list[str]:
+        """Build an ``ios4 afc --documents`` command for ``app_id``."""
+        return self._command("afc", "--documents", app_id, *arguments)
+
+    def _run_documents(self, app_id: str, *arguments: str) -> CommandResult:
+        """Run an ``afc --documents`` subcommand without raising on failure."""
+        return self._runner.run(
+            self._documents_command(app_id, *arguments), check=False
+        )
+
+    def _documents_stat(self, app_id: str, remote: str) -> str | None:
+        """Return the ``st_ifmt`` of ``remote``, or ``None`` when it is missing."""
+        result = self._run_documents(app_id, "info", remote)
+        if result.returncode != 0:
+            return None
+        match = _DOCUMENTS_IFMT_PATTERN.search(result.stdout)
+        return match.group(1) if match is not None else _DOCUMENTS_FILE_IFMT
+
+    def _documents_is_dir(self, app_id: str, remote: str) -> bool:
+        """Return whether ``remote`` is an existing directory."""
+        return self._documents_stat(app_id, remote) == _DOCUMENTS_DIR_IFMT
+
+    @staticmethod
+    def _unescape_listing_entry(value: str) -> str:
+        """Decode the escapes ``afc list`` writes in its quoted entry names."""
+        escapes = {"n": "\n", "r": "\r", "t": "\t", "0": "\0"}
+        decoded: list[str] = []
+        characters = iter(value)
+        for character in characters:
+            if character != "\\":
+                decoded.append(character)
+                continue
+            escaped = next(characters, "")
+            decoded.append(escapes.get(escaped, escaped))
+        return "".join(decoded)
+
+    @classmethod
+    def _parse_documents_listing(cls, output: str) -> list[str]:
+        """Parse entry names out of ``afc list`` output, dropping ``.``/``..``."""
+        entries: list[str] = []
+        for line in output.splitlines():
+            match = _DOCUMENTS_LIST_ENTRY_PATTERN.match(line)
+            if match is None:
+                continue
+            name = cls._unescape_listing_entry(match.group(1))
+            if name in (".", ".."):
+                continue
+            entries.append(name)
+        return entries
+
+    def _documents_mkdir(self, app_id: str, remote: str) -> bool:
+        """Create ``remote`` and any missing parents. Existing dirs are fine."""
+        result = self._run_documents(app_id, "mkdir", remote)
+        if result.returncode != 0:
+            logger.error(
+                f"{_LOG_TAG} Failed to create {self.device_id}:{remote}: "
+                f"{result.stderr.strip()}"
+            )
+            return False
+        return True
+
+    def _documents_upload(self, app_id: str, local: Path, remote: str) -> bool:
+        """Upload a single file, creating its remote parent directory first."""
+        parent = posixpath.dirname(remote)
+        if parent and not self._documents_mkdir(app_id, parent):
+            return False
+        result = self._run_documents(app_id, "upload", str(local), remote)
+        if result.returncode != 0:
+            logger.error(
+                f"{_LOG_TAG} Failed to push {local} to {self.device_id}:{remote}: "
+                f"{result.stderr.strip()}"
+            )
+            return False
+        return True
+
+    def _documents_download(self, app_id: str, remote: str, local: Path) -> bool:
+        """Download a single file, creating its local parent directory first."""
+        local.parent.mkdir(parents=True, exist_ok=True)
+        result = self._run_documents(app_id, "download", remote, str(local))
+        if result.returncode != 0:
+            logger.error(
+                f"{_LOG_TAG} Failed to pull {self.device_id}:{remote} to {local}: "
+                f"{result.stderr.strip()}"
+            )
+            return False
+        return True
+
+    def _documents_push_dir(self, app_id: str, local: Path, remote: str) -> bool:
+        """Upload the ``local`` directory tree to ``remote`` entry by entry.
+
+        ``afc upload`` only handles single files, so directories are walked
+        here and recreated with ``afc mkdir``.
+        """
+        if not self._documents_mkdir(app_id, remote):
+            return False
+        succeeded = True
+        for entry in sorted(local.iterdir()):
+            child = posixpath.join(remote, entry.name)
+            if entry.is_dir():
+                succeeded &= self._documents_push_dir(app_id, entry, child)
+            else:
+                succeeded &= self._documents_upload(app_id, entry, child)
+        return succeeded
+
+    def _documents_pull_dir(self, app_id: str, remote: str, local: Path) -> bool:
+        """Download the ``remote`` directory tree into ``local`` entry by entry."""
+        local.mkdir(parents=True, exist_ok=True)
+        listing = self._run_documents(app_id, "list", remote)
+        if listing.returncode != 0:
+            logger.error(
+                f"{_LOG_TAG} Failed to list {self.device_id}:{remote}: "
+                f"{listing.stderr.strip()}"
+            )
+            return False
+        succeeded = True
+        for name in self._parse_documents_listing(listing.stdout):
+            child = posixpath.join(remote, name)
+            if self._documents_is_dir(app_id, child):
+                succeeded &= self._documents_pull_dir(app_id, child, local / name)
+            else:
+                succeeded &= self._documents_download(app_id, child, local / name)
+        return succeeded
+
     def documents_exists(self, app_id: str, remote: str) -> bool:
-        del app_id, remote
-        self._unsupported("documents_exists")
+        """Check whether ``remote`` exists in the app's Documents sandbox."""
+        self._require_app_and_remote(app_id, remote)
+        path = self._documents_path(remote)
+        exists = self._documents_stat(app_id, path) is not None
+        logger.debug(f"{_LOG_TAG} {self.device_id}:{path} exists: {exists}")
+        return exists
 
     def documents_ls(self, app_id: str, remote: str) -> list[str]:
-        del app_id, remote
-        self._unsupported("documents_ls")
+        """List entry names under ``remote`` in the app's Documents sandbox.
+
+        When ``remote`` points to a file, the file's own name is returned so the
+        behaviour matches shell ``ls`` on both files and directories.
+        """
+        self._require_app_and_remote(app_id, remote)
+        path = self._documents_path(remote)
+        ifmt = self._documents_stat(app_id, path)
+        if ifmt is None:
+            raise FileNotFoundError(f"Remote path not found: {self.device_id}:{path}")
+        if ifmt != _DOCUMENTS_DIR_IFMT:
+            return [posixpath.basename(path)]
+        logger.info(f"{_LOG_TAG} Listing {self.device_id}:{path}")
+        result = self._run_documents(app_id, "list", path)
+        if result.returncode != 0:
+            raise IOSDevice4Error(
+                f"{_LOG_TAG} Failed to list {self.device_id}:{path}: "
+                f"{result.stderr.strip()}"
+            )
+        return self._parse_documents_listing(result.stdout)
 
     def documents_pull(
         self, app_id: str, remote: str, local: Path | str
     ) -> bool:
-        del app_id, remote, local
-        self._unsupported("documents_pull")
+        """Pull a file or directory from the app's Documents sandbox."""
+        self._require_app_and_remote(app_id, remote)
+        path = self._documents_path(remote)
+        ifmt = self._documents_stat(app_id, path)
+        if ifmt is None:
+            logger.warning(f"{_LOG_TAG} Remote path not found: {self.device_id}:{path}")
+            return False
+        local_path = Path(local)
+        if local_path.is_dir():
+            local_path = local_path / posixpath.basename(path)
+        logger.info(f"{_LOG_TAG} Pulling {self.device_id}:{path} to {local_path}")
+        if ifmt == _DOCUMENTS_DIR_IFMT:
+            return self._documents_pull_dir(app_id, path, local_path)
+        return self._documents_download(app_id, path, local_path)
 
     def documents_push(
         self, app_id: str, local: Path | str, remote: str
     ) -> bool:
-        del app_id, local, remote
-        self._unsupported("documents_push")
+        """Push a local file or directory into the app's Documents sandbox."""
+        self._require_app_and_remote(app_id, remote)
+        local_path = Path(local)
+        if not local_path.exists():
+            logger.warning(f"{_LOG_TAG} Local path not found: {local_path}")
+            return False
+        path = self._documents_path(remote)
+        if self._documents_is_dir(app_id, path):
+            path = posixpath.join(path, local_path.name)
+        logger.info(f"{_LOG_TAG} Pushing {local_path} to {self.device_id}:{path}")
+        if local_path.is_dir():
+            return self._documents_push_dir(app_id, local_path, path)
+        return self._documents_upload(app_id, local_path, path)
 
     def documents_rm(self, app_id: str, remote: str) -> bool:
-        del app_id, remote
-        self._unsupported("documents_rm")
+        """Remove a file or directory from the app's Documents sandbox."""
+        self._require_app_and_remote(app_id, remote)
+        path = self._documents_path(remote)
+        ifmt = self._documents_stat(app_id, path)
+        if ifmt is None:
+            logger.warning(f"{_LOG_TAG} Remote path not found: {self.device_id}:{path}")
+            return False
+        logger.info(f"{_LOG_TAG} Removing {self.device_id}:{path}")
+        # `afc remove` only unlinks files and empty directories; `remove_all`
+        # is the recursive variant.
+        subcommand = "remove_all" if ifmt == _DOCUMENTS_DIR_IFMT else "remove"
+        result = self._run_documents(app_id, subcommand, path)
+        if result.returncode != 0:
+            logger.error(
+                f"{_LOG_TAG} Failed to remove {self.device_id}:{path}: "
+                f"{result.stderr.strip()}"
+            )
+            return False
+        return True
 
     def pull2(
         self, data_path: AppDataPath, remote: str, local: Path | str

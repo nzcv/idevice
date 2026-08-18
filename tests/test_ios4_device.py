@@ -800,3 +800,275 @@ def test_default_udid_rejects_unexpected_output() -> None:
         ):
             with pytest.raises(DeviceNotFoundError, match="UniqueDeviceID"):
                 IOSDevice4.default_udid()
+
+
+def afc_command(*arguments: str) -> list[str]:
+    """Build the ``afc --documents`` command the device is expected to run."""
+    return [BINARY, "--udid", UDID, "afc", "--documents", APP_ID, *arguments]
+
+
+def file_info(ifmt: str) -> CommandResult:
+    """Fake ``afc info`` output for a directory or regular file."""
+    return result(stdout=f"FileInfo {{\n    size: 14,\n    st_ifmt: {ifmt!r},\n}}\n".replace("'", '"'))
+
+
+MISSING = result(returncode=134, stderr="Failed to get file info: Afc(ObjectNotFound)\n")
+
+
+def listing(*names: str) -> CommandResult:
+    """Fake ``afc list`` output, including the ``.``/``..`` entries."""
+    entries = "".join(f'    "{name}",\n' for name in (".", "..", *names))
+    return result(stdout=f"/Documents\n[\n{entries}]\n")
+
+
+def route(responses: dict[str, CommandResult]) -> object:
+    """Dispatch a mocked runner call on ``<subcommand> <first argument>``."""
+
+    def _run(command: list[str], **_: object) -> CommandResult:
+        key = " ".join(command[6:8])
+        if key not in responses:
+            raise AssertionError(f"unexpected command: {command}")
+        return responses[key]
+
+    return _run
+
+
+def test_documents_path_anchors_under_documents_and_rejects_parent() -> None:
+    assert IOSDevice4._documents_path("Logs/app.log") == "/Documents/Logs/app.log"
+    assert IOSDevice4._documents_path("/Logs/app.log") == "/Documents/Logs/app.log"
+    assert IOSDevice4._documents_path("\\Logs\\app.log") == "/Documents/Logs/app.log"
+    assert IOSDevice4._documents_path("/") == "/Documents"
+    with pytest.raises(ValueError, match=r"\.\."):
+        IOSDevice4._documents_path("../escape")
+
+
+def test_documents_helpers_validate_arguments(ios4_device: IOSDevice4) -> None:
+    with pytest.raises(ValueError, match="app_id is required"):
+        ios4_device.documents_exists("", "Logs")
+    with pytest.raises(ValueError, match="remote is required"):
+        ios4_device.documents_ls(APP_ID, "")
+
+
+def test_documents_exists_uses_afc_info(ios4_device: IOSDevice4) -> None:
+    ios4_device._runner.run.return_value = file_info("S_IFREG")
+
+    assert ios4_device.documents_exists(APP_ID, "Logs/app.log") is True
+
+    ios4_device._runner.run.assert_called_once_with(
+        afc_command("info", "/Documents/Logs/app.log"), check=False
+    )
+
+
+def test_documents_exists_false_when_info_fails(ios4_device: IOSDevice4) -> None:
+    ios4_device._runner.run.return_value = MISSING
+
+    assert ios4_device.documents_exists(APP_ID, "Logs/app.log") is False
+
+
+def test_documents_ls_lists_directory_entries(ios4_device: IOSDevice4) -> None:
+    ios4_device._runner.run.side_effect = route(
+        {
+            "info /Documents/Logs": file_info("S_IFDIR"),
+            "list /Documents/Logs": listing("app.log", "旧日志"),
+        }
+    )
+
+    assert ios4_device.documents_ls(APP_ID, "Logs") == ["app.log", "旧日志"]
+
+
+def test_documents_ls_on_a_file_returns_its_name(ios4_device: IOSDevice4) -> None:
+    ios4_device._runner.run.return_value = file_info("S_IFREG")
+
+    assert ios4_device.documents_ls(APP_ID, "Logs/app.log") == ["app.log"]
+
+
+def test_documents_ls_raises_when_missing(ios4_device: IOSDevice4) -> None:
+    ios4_device._runner.run.return_value = MISSING
+
+    with pytest.raises(FileNotFoundError, match="/Documents/Logs"):
+        ios4_device.documents_ls(APP_ID, "Logs")
+
+
+def test_documents_pull_downloads_a_file(
+    ios4_device: IOSDevice4, tmp_path: Path
+) -> None:
+    dest = tmp_path / "out" / "app.log"
+    ios4_device._runner.run.side_effect = route(
+        {
+            "info /Documents/Logs/app.log": file_info("S_IFREG"),
+            "download /Documents/Logs/app.log": result(),
+        }
+    )
+
+    assert ios4_device.documents_pull(APP_ID, "Logs/app.log", dest) is True
+
+    ios4_device._runner.run.assert_called_with(
+        afc_command("download", "/Documents/Logs/app.log", str(dest)), check=False
+    )
+    assert dest.parent.is_dir()
+
+
+def test_documents_pull_into_existing_dir_keeps_remote_name(
+    ios4_device: IOSDevice4, tmp_path: Path
+) -> None:
+    ios4_device._runner.run.side_effect = route(
+        {
+            "info /Documents/Logs/app.log": file_info("S_IFREG"),
+            "download /Documents/Logs/app.log": result(),
+        }
+    )
+
+    assert ios4_device.documents_pull(APP_ID, "Logs/app.log", tmp_path) is True
+
+    ios4_device._runner.run.assert_called_with(
+        afc_command(
+            "download", "/Documents/Logs/app.log", str(tmp_path / "app.log")
+        ),
+        check=False,
+    )
+
+
+def test_documents_pull_walks_directories(
+    ios4_device: IOSDevice4, tmp_path: Path
+) -> None:
+    dest = tmp_path / "Logs"
+    ios4_device._runner.run.side_effect = route(
+        {
+            "info /Documents/Logs": file_info("S_IFDIR"),
+            "list /Documents/Logs": listing("app.log", "old"),
+            "info /Documents/Logs/app.log": file_info("S_IFREG"),
+            "download /Documents/Logs/app.log": result(),
+            "info /Documents/Logs/old": file_info("S_IFDIR"),
+            "list /Documents/Logs/old": listing("2024.log"),
+            "info /Documents/Logs/old/2024.log": file_info("S_IFREG"),
+            "download /Documents/Logs/old/2024.log": result(),
+        }
+    )
+
+    assert ios4_device.documents_pull(APP_ID, "Logs", dest) is True
+
+    assert (dest / "old").is_dir()
+    downloads = [
+        call.args[0][7]
+        for call in ios4_device._runner.run.call_args_list
+        if call.args[0][6] == "download"
+    ]
+    assert downloads == [
+        "/Documents/Logs/app.log",
+        "/Documents/Logs/old/2024.log",
+    ]
+
+
+def test_documents_pull_false_when_remote_missing(
+    ios4_device: IOSDevice4, tmp_path: Path
+) -> None:
+    ios4_device._runner.run.return_value = MISSING
+
+    assert ios4_device.documents_pull(APP_ID, "Logs", tmp_path / "out") is False
+
+
+def test_documents_push_creates_remote_parent_then_uploads(
+    ios4_device: IOSDevice4, tmp_path: Path
+) -> None:
+    local = tmp_path / "app.log"
+    local.write_text("log")
+    ios4_device._runner.run.side_effect = route(
+        {
+            "info /Documents/Logs/app.log": MISSING,
+            "mkdir /Documents/Logs": result(),
+            "upload " + str(local): result(),
+        }
+    )
+
+    assert ios4_device.documents_push(APP_ID, local, "Logs/app.log") is True
+
+    ios4_device._runner.run.assert_called_with(
+        afc_command("upload", str(local), "/Documents/Logs/app.log"), check=False
+    )
+
+
+def test_documents_push_into_existing_dir_keeps_local_name(
+    ios4_device: IOSDevice4, tmp_path: Path
+) -> None:
+    local = tmp_path / "app.log"
+    local.write_text("log")
+    ios4_device._runner.run.side_effect = route(
+        {
+            "info /Documents/Logs": file_info("S_IFDIR"),
+            "mkdir /Documents/Logs": result(),
+            "upload " + str(local): result(),
+        }
+    )
+
+    assert ios4_device.documents_push(APP_ID, local, "Logs") is True
+
+    ios4_device._runner.run.assert_called_with(
+        afc_command("upload", str(local), "/Documents/Logs/app.log"), check=False
+    )
+
+
+def test_documents_push_walks_directories(
+    ios4_device: IOSDevice4, tmp_path: Path
+) -> None:
+    local = tmp_path / "Logs"
+    (local / "old").mkdir(parents=True)
+    (local / "app.log").write_text("log")
+    (local / "old" / "2024.log").write_text("old")
+    ios4_device._runner.run.side_effect = route(
+        {
+            "info /Documents/Logs": MISSING,
+            "mkdir /Documents/Logs": result(),
+            "mkdir /Documents/Logs/old": result(),
+            "upload " + str(local / "app.log"): result(),
+            "upload " + str(local / "old" / "2024.log"): result(),
+        }
+    )
+
+    assert ios4_device.documents_push(APP_ID, local, "Logs") is True
+
+    uploads = [
+        call.args[0][8]
+        for call in ios4_device._runner.run.call_args_list
+        if call.args[0][6] == "upload"
+    ]
+    assert uploads == [
+        "/Documents/Logs/app.log",
+        "/Documents/Logs/old/2024.log",
+    ]
+
+
+def test_documents_push_false_when_local_missing(
+    ios4_device: IOSDevice4, tmp_path: Path
+) -> None:
+    assert ios4_device.documents_push(APP_ID, tmp_path / "nope", "Logs") is False
+    ios4_device._runner.run.assert_not_called()
+
+
+def test_documents_rm_removes_files_and_trees(ios4_device: IOSDevice4) -> None:
+    ios4_device._runner.run.side_effect = route(
+        {
+            "info /Documents/Logs/app.log": file_info("S_IFREG"),
+            "remove /Documents/Logs/app.log": result(),
+        }
+    )
+    assert ios4_device.documents_rm(APP_ID, "Logs/app.log") is True
+    ios4_device._runner.run.assert_called_with(
+        afc_command("remove", "/Documents/Logs/app.log"), check=False
+    )
+
+    ios4_device._runner.run.side_effect = route(
+        {
+            "info /Documents/Logs": file_info("S_IFDIR"),
+            "remove_all /Documents/Logs": result(),
+        }
+    )
+    assert ios4_device.documents_rm(APP_ID, "Logs") is True
+    ios4_device._runner.run.assert_called_with(
+        afc_command("remove_all", "/Documents/Logs"), check=False
+    )
+
+
+def test_documents_rm_false_when_missing(ios4_device: IOSDevice4) -> None:
+    ios4_device._runner.run.return_value = MISSING
+
+    assert ios4_device.documents_rm(APP_ID, "Logs") is False
