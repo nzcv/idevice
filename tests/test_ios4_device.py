@@ -779,11 +779,17 @@ def test_argument_and_environment_validation() -> None:
         IOSDevice4._encode_environment({"KEY": "a,b"})
 
 
-def test_default_udid_parses_ideviceinfo() -> None:
+@pytest.mark.parametrize(
+    "stdout",
+    [
+        f'"UniqueDeviceID": String("{UDID}")\n',
+        f'    "UniqueDeviceID": String(\n        "{UDID}",\n    ),\n',
+    ],
+    ids=["without-trailing-comma", "with-trailing-comma"],
+)
+def test_default_udid_parses_ideviceinfo(stdout: str) -> None:
     runner = MagicMock()
-    runner.run.return_value = result(
-        stdout=f'"UniqueDeviceID": String("{UDID}")\n'
-    )
+    runner.run.return_value = result(stdout=stdout)
     with patch("idevice.device.ios4.device.ios4_binary", return_value=BINARY):
         with patch(
             "idevice.device.ios4.device.SubprocessRunner", return_value=runner

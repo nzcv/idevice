@@ -38,7 +38,7 @@ _DOCUMENTS_FILE_IFMT = "S_IFREG"
 _DOCUMENTS_IFMT_PATTERN = re.compile(r'st_ifmt:\s*"(\w+)"')
 _DOCUMENTS_LIST_ENTRY_PATTERN = re.compile(r'^\s*"((?:[^"\\]|\\.)*)",?\s*$')
 _UDID_PATTERN = re.compile(
-    r'UniqueDeviceID["\']?\s*:\s*String\(\s*"([^"\\]+)"\s*\)'
+    r'UniqueDeviceID["\']?\s*:\s*String\(\s*"([^"\\]+)"\s*,?\s*\)'
 )
 _WDA_PROCESS_MARKERS = ("webdriveragent", "xctrunner")
 _WDA_PORT = 8100
