@@ -211,6 +211,7 @@ Every platform implementation shares the same interface:
 - `install(package_path, app_id=None)` — install `.ipa` / `.apk` and optionally record bundle id → file name
 - `uninstall(app_id)` / `is_installed(app_id)` / `get_installed_pkg_name(app_id)` — the latter returns an `InstalledAppInfo(app_id, version, path)` or `None`
 - `launch_app(app_id=None)` / `stop_app(app_id=None)` — both use the bound `package_name` when `app_id` is omitted
+- `launch(app_id=None)` — optional native device-service launch, currently implemented only by `IOSDevice4`
 - `package_name` — default app id set at `Device.create` / `Device.from_env` (`GAUTO_PACKAGE_NAME`)
 - `push(local, remote, app_id=None, documents_only=False)` / `pull(remote, local, app_id=None, documents_only=True)` — host ↔ device file transfer
 - `ls(remote, app_id=None, recursive=False)` — list a remote directory on the device
@@ -247,6 +248,7 @@ Higher-level UI helpers built on top of device tooling. Currently only `AndroidU
 
 - IPA/app-directory install via the standalone `ideviceinstaller` CLI when present, otherwise `ios4 ideviceinstaller install`
 - Exact bundle-id checks via `application_listing`
+- Direct native launch via `app_service launch`
 - Launch via WebDriverAgent first, falling back to `process_control`; both carry ordered `argv` and environment values
 - Xcode-compatible snapshots via `memgraph`, defaulting to the last launch PID
 - Tracks the launch PID so `memgraph` can reuse it — `process_control` always reports one, while a WDA launch resolves it best-effort from the WDA app list

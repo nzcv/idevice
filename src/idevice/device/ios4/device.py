@@ -49,6 +49,7 @@ class IOSDevice4(DeviceBase):
     ``ios4`` subcommands:
 
     * ``application_listing`` for exact bundle-id checks.
+    * ``app_service launch`` for direct native launches.
     * WebDriverAgent for launches, with ``process_control`` as the fallback
       that also reports the launch PID.
     * ``screenshot`` for screen capture.
@@ -312,6 +313,27 @@ class IOSDevice4(DeviceBase):
             )
         self._last_launch_pid = int(match.group(1))
         self._last_launch_app_id = target
+
+    def launch(self, app_id: str | None = None) -> None:
+        """Launch an app directly through the ios4 CoreDevice app service.
+
+        Unlike :meth:`launch_app`, this lower-level operation does not use
+        WebDriverAgent, accept launch arguments, or report a process ID.
+
+        Args:
+            app_id: Bundle identifier to launch. When omitted or empty, uses
+                the bound :attr:`package_name`.
+
+        Raises:
+            ValueError: If both ``app_id`` and :attr:`package_name` are empty.
+            CommandExecutionError: If the ios4 command fails.
+        """
+        target = self._resolve_app_id(app_id)
+        logger.info(
+            f"{_LOG_TAG} Launching {target} through app service on "
+            f"{self.device_id}"
+        )
+        self._runner.run(self._command("app_service", "launch", target))
 
     def capture_memgraph(
         self,

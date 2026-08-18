@@ -331,6 +331,28 @@ def test_launch_requires_pid_in_process_control_output(
             ios4_device.launch_app(APP_ID)
 
 
+def test_native_launch_uses_ios4_app_service(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._last_launch_pid = 4815
+
+    ios4_device.launch(APP_ID)
+
+    ios4_device._runner.run.assert_called_once_with(
+        [BINARY, "--udid", UDID, "app_service", "launch", APP_ID]
+    )
+    assert ios4_device.last_launch_pid is None
+    assert ios4_device._last_launch_app_id == APP_ID
+
+
+def test_native_launch_uses_bound_package_name(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device.launch()
+
+    assert ios4_device._runner.run.call_args.args[0][-1] == APP_ID
+
+
 def test_capture_memgraph_uses_last_pid_and_atomically_writes_output(
     ios4_device: IOSDevice4, tmp_path: Path
 ) -> None:

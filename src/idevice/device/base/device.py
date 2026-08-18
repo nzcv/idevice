@@ -203,6 +203,26 @@ class DeviceBase(ABC):
         """
         raise NotImplementedError
 
+    def launch(self, app_id: str | None = None) -> None:
+        """Launch an app with the platform's native device service.
+
+        This is an optional lower-level operation. Use :meth:`launch_app` for
+        the portable app-launch API.
+
+        Args:
+            app_id: ID of the app to launch (bundle id / package name). When
+                omitted or empty, implementations may use the bound
+                :attr:`package_name`.
+
+        Raises:
+            NotImplementedError: When the platform has no native launch
+                implementation.
+        """
+        del app_id
+        raise NotImplementedError(
+            f"launch is not supported on {self.platform} devices"
+        )
+
     @abstractmethod
     def stop_app(self, app_id: str | None = None) -> None:
         """Stop (kill) a running app on the bound device.
