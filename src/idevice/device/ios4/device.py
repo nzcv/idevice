@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
+import time
 from pathlib import Path
+from collections.abc import Iterator
 from typing import NoReturn
-
 import wda
 
 from idevice.device.base.device import AppDataPath, DeviceBase
@@ -35,7 +38,11 @@ _UDID_PATTERN = re.compile(
 )
 _WDA_PROCESS_MARKERS = ("webdriveragent", "xctrunner")
 _WDA_PORT = 8100
+_WDA_READY_TIMEOUT = 60.0
 _POPUP_BUTTON_LABELS = (
+    "无线局域网与蜂窝网络",
+    "继续",
+    "使用App时允许",
     "Allow",
     "Allow Once",
     "Allow While Using App",
@@ -69,7 +76,7 @@ class IOSDevice4(DeviceBase):
     ``ios4`` subcommands:
 
     * ``application_listing`` for exact bundle-id checks.
-    * ``app_service launch`` for direct native launches.
+    * ``process_control`` for direct native launches.
     * WebDriverAgent for launches, with ``process_control`` as the fallback
       that also reports the launch PID.
     * ``screenshot`` for screen capture.
@@ -98,11 +105,6 @@ class IOSDevice4(DeviceBase):
         self._app_cache = InstalledAppCache(device_id, cache_dir=cache_dir)
         self._last_launch_pid: int | None = None
         self._last_launch_app_id = ""
-        self._message_popup_stop_event = threading.Event()
-        self._message_popup_stop_event.set()
-        self._message_popup_thread: threading.Thread | None = None
-        self._message_popup_lock = threading.Lock()
-
         if self._resolve_binary(self._binary) is None:
             logger.error(f"{_LOG_TAG} `{self._binary}` CLI not found")
             raise IOSDevice4Error(
@@ -338,11 +340,53 @@ class IOSDevice4(DeviceBase):
         self._last_launch_pid = int(match.group(1))
         self._last_launch_app_id = target
 
-    def launch(self, app_id: str | None = None) -> None:
-        """Launch an app directly through the ios4 CoreDevice app service.
+    def launch_wda(self, bundle_id: str) -> None:
+        """Start WebDriverAgent on the device, unless it is already ready.
 
-        Unlike :meth:`launch_app`, this lower-level operation does not use
-        WebDriverAgent, accept launch arguments, or report a process ID.
+        A ``status`` probe decides readiness; when WDA already answers it,
+        the existing instance is left alone (killing it would also kill
+        whatever xctest runner started it, which this call may not own).
+        Otherwise the xctest runner is (re)started and this call blocks
+        until WDA answers ``status`` or ``timeout`` elapses.
+
+        Args:
+            bundle_id: WDA xctest runner bundle id, e.g.
+                ``com.example.WebDriverAgentRunner.xctrunner``.
+
+        Raises:
+            ValueError: If ``bundle_id`` is empty.
+            IOSDevice4Error: If WDA does not become ready in time.
+        """
+        if not bundle_id:
+            raise ValueError("bundle_id is required and must be a non-empty string")
+
+        if wda.Client(self.wda_url()).is_ready():
+            logger.info(f"{_LOG_TAG} WDA already ready on {self.device_id}")
+            return
+
+        logger.info(
+            f"{_LOG_TAG} WDA not ready on {self.device_id}; starting {bundle_id}"
+        )
+        self.launch(bundle_id)
+
+        if not wda.Client(self.wda_url()).wait_ready(timeout=_WDA_READY_TIMEOUT):
+            raise IOSDevice4Error(
+                f"{_LOG_TAG} WDA did not become ready on {self.device_id} "
+                f"within {_WDA_READY_TIMEOUT:g}s after starting {bundle_id}"
+            )
+        logger.info(f"{_LOG_TAG} WDA ready on {self.device_id}")
+
+        self.dismiss_message_popup(duration=60*10)
+
+    def wda_url(self) -> str | None:
+        """Return the bound WDA base URL, or ``None`` for the client default."""
+        return f"http://{self.device_ip}:{_WDA_PORT}" if self.device_ip else None
+
+    def launch(self, app_id: str) -> None:
+        """Launch an app directly through the ios4 ``process_control`` command.
+
+        Unlike :meth:`launch_app`, this lower-level operation uses
+        :command:`process_control` and reports the launch PID if available.
 
         Args:
             app_id: Bundle identifier to launch. When omitted or empty, uses
@@ -350,14 +394,10 @@ class IOSDevice4(DeviceBase):
 
         Raises:
             ValueError: If both ``app_id`` and :attr:`package_name` are empty.
-            CommandExecutionError: If the ios4 command fails.
+            IOSDevice4Error: If ios4 does not return a launch PID.
         """
-        target = self._resolve_app_id(app_id)
-        logger.info(
-            f"{_LOG_TAG} Launching {target} through app service on "
-            f"{self.device_id}"
-        )
-        self._runner.run(self._command("app_service", "launch", target))
+        command = self._command("process_control", app_id)
+        self._runner.run(command)
 
     def capture_memgraph(
         self,
@@ -457,10 +497,6 @@ class IOSDevice4(DeviceBase):
             )
         self._clear_last_launch(target)
 
-    def _wda_url(self) -> str | None:
-        """Return the bound WDA base URL, or ``None`` for the client default."""
-        return f"http://{self.device_ip}:{_WDA_PORT}" if self.device_ip else None
-
     def _launch_app_via_wda(
         self, app_id: str, args: list[str], environment: dict[str, str]
     ) -> bool:
@@ -470,7 +506,7 @@ class IOSDevice4(DeviceBase):
         application under test on some WebDriverAgent builds.
         """
         try:
-            session = wda.Client(self._wda_url()).session(
+            session = wda.Client(self.wda_url()).session(
                 app_id,
                 arguments=args or None,
                 environment=environment or None,
@@ -511,7 +547,7 @@ class IOSDevice4(DeviceBase):
     def _stop_app_via_wda(self, app_id: str) -> bool:
         """Return whether WDA accepted an app-termination request."""
         try:
-            with wda.Client(self._wda_url()).session() as session:
+            with wda.Client(self.wda_url()).session() as session:
                 session.app_terminate(app_id)
         except Exception as exc:
             logger.warning(
@@ -571,7 +607,7 @@ class IOSDevice4(DeviceBase):
             f"{_LOG_TAG} Tapping ({x}, {y}) on {self.device_id}{app_context}"
         )
         try:
-            with wda.Client(self._wda_url()).session() as session:
+            with wda.Client(self.wda_url()).session() as session:
                 session.click(float(x), float(y))
         except Exception as exc:
             raise IOSDevice4Error(
@@ -579,129 +615,104 @@ class IOSDevice4(DeviceBase):
                 f"{self.device_id}{app_context}: {exc}"
             ) from exc
 
-    def start_message_popup_handler(
-        self,
-        *,
-        button_labels: tuple[str, ...] | list[str] | None = None,
-        interval: float = 1.0,
-        timeout: float = 1.0,
-    ) -> None:
-        """Start a background thread to auto-dismiss message popups.
-
-        Args:
-            button_labels: Labels tried per popup. Defaults to built-in labels.
-            interval: Seconds between each scan.
-            timeout: Per-button/alert timeout passed to WDA.
-        """
-        if interval <= 0:
-            raise ValueError("interval must be a positive number")
-        if timeout <= 0:
-            raise ValueError("timeout must be a positive number")
-
-        labels = self._normalize_message_popup_labels(button_labels)
-
-        with self._message_popup_lock:
-            if (
-                self._message_popup_thread is not None
-                and self._message_popup_thread.is_alive()
-            ):
-                return
-
-            self._message_popup_stop_event.clear()
-            self._message_popup_thread = threading.Thread(
-                target=self._run_message_popup_handler,
-                args=(labels, interval, timeout),
-                daemon=True,
-            )
-            self._message_popup_thread.start()
-
-    def stop_message_popup_handler(self) -> None:
-        """Stop the background popup handler thread."""
-        with self._message_popup_lock:
-            thread = self._message_popup_thread
-            self._message_popup_stop_event.set()
-            self._message_popup_thread = None
-
-        if thread is not None and thread.is_alive():
-            thread.join(timeout=2.0)
-
-    def _run_message_popup_handler(
-        self,
-        labels: tuple[str, ...],
-        interval: float,
-        timeout: float,
-    ) -> None:
-        try:
-            session = wda.Client(self._wda_url()).session()
-        except Exception as exc:
-            logger.debug(
-                f"{_LOG_TAG} popup handler stopped due to WDA error on "
-                f"{self.device_id}: {exc}"
-            )
-            return
-
-        try:
-            while not self._message_popup_stop_event.is_set():
-                try:
-                    self._dismiss_message_popup_with_session(session, labels, timeout)
-                except Exception:
-                    logger.debug(
-                        f"{_LOG_TAG} popup handler ignored transient WDA error "
-                        f"on {self.device_id}"
-                    )
-                if self._message_popup_stop_event.wait(interval):
-                    break
-        finally:
-            self._close_wda_session(session)
-
-    def _dismiss_message_popup_with_session(
-        self, session: wda.Client, labels: tuple[str, ...], timeout: float
-    ) -> bool:
-        """Try to dismiss one popup using a single WDA session."""
-        alert = getattr(session, "alert", None)
-        if alert is None or not self._exists_with_timeout(alert, timeout):
-            return False
-
-        for label in labels:
-            if self._tap_button_if_present(session, label, timeout):
-                logger.info(
-                    f"{_LOG_TAG} Dismissed message popup on "
-                    f"{self.device_id} using button={label!r}"
-                )
-                return True
-        return False
-
     def dismiss_message_popup(
         self,
         *,
         button_labels: tuple[str, ...] | list[str] | None = None,
         timeout: float = 1.0,
+        duration: float | None = None,
+        interval: float = 1.0,
     ) -> bool:
-        """Dismiss the topmost message popup via WDA alert controls.
+        """Dismiss message popups via WDA alert controls.
+
+        By default this checks once and returns. Pass ``duration`` to keep
+        watching for that many seconds, dismissing every popup that appears --
+        useful across a launch or login flow that raises several permission
+        prompts. The whole watch reuses one WDA session, and popups that appear
+        while the loop is running are handled as they show up. Use
+        :meth:`start_message_popup_handler` instead when the watch must run in
+        the background rather than block the caller.
 
         Args:
             button_labels: Labels tried in order. Defaults to a built-in set
                 that covers common iOS and Chinese popups.
             timeout: Per-element check timeout for alert/button presence.
+            duration: Seconds to keep watching. ``None`` checks exactly once.
+            interval: Seconds between scans while watching. Ignored when
+                ``duration`` is ``None``.
 
         Returns:
-            bool: ``True`` when a button is clicked.
+            bool: ``True`` when at least one popup was dismissed.
+
+        Raises:
+            ValueError: If ``timeout``, ``interval``, or ``duration`` is not
+                a positive number.
+            IOSDevice4Error: If the WDA session cannot be opened.
         """
         if timeout <= 0:
             raise ValueError("timeout must be a positive number")
+        if interval <= 0:
+            raise ValueError("interval must be a positive number")
+        if duration is not None and duration <= 0:
+            raise ValueError("duration must be a positive number")
 
         labels = self._normalize_message_popup_labels(button_labels)
 
         try:
-            with wda.Client(self._wda_url()).session() as session:
-                return self._dismiss_message_popup_with_session(
-                    session, labels, timeout
+            logger.info(f"wda_url: {self.wda_url()}")
+            with wda.Client(self.wda_url()).session() as session:
+                if duration is None:
+                    return self._dismiss_message_popup_with_session(
+                        session, labels, timeout
+                    )
+                return self._watch_message_popups(
+                    session, labels, timeout, duration, interval
                 )
         except Exception as exc:
             raise IOSDevice4Error(
                 f"{_LOG_TAG} WDA failed to handle message popup on "
                 f"{self.device_id}: {exc}"
             ) from exc
+
+    def _watch_message_popups(
+        self,
+        session: wda.Client,
+        labels: tuple[str, ...],
+        timeout: float,
+        duration: float,
+        interval: float,
+    ) -> bool:
+        """Dismiss popups for ``duration`` seconds, reusing one WDA session.
+
+        A popup appearing and vanishing between the alert check and the click
+        makes WDA raise, so a failed scan is logged and the watch continues
+        rather than cutting the requested duration short.
+        """
+        logger.info(
+            f"{_LOG_TAG} Watching for message popups on {self.device_id} "
+            f"for {duration:g}s"
+        )
+        deadline = time.monotonic() + duration
+        dismissed = 0
+        while True:
+            try:
+                if self._dismiss_message_popup_with_session(session, labels, timeout):
+                    dismissed += 1
+            except Exception as exc:
+                logger.debug(
+                    f"{_LOG_TAG} popup watch ignored transient WDA error on "
+                    f"{self.device_id}: {exc}"
+                )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(interval, remaining))
+
+        logger.info(
+            f"{_LOG_TAG} Dismissed {dismissed} message popup(s) on "
+            f"{self.device_id} over {duration:g}s"
+        )
+        return dismissed > 0
 
     @staticmethod
     def _normalize_message_popup_labels(
@@ -720,58 +731,6 @@ class IOSDevice4(DeviceBase):
         if not normalized:
             raise ValueError("at least one button label is required")
         return normalized
-
-    @staticmethod
-    def _close_wda_session(session: object | None) -> None:
-        """Close a WDA session created manually in a background thread."""
-        if session is None:
-            return
-        exit_method = getattr(session, "__exit__", None)
-        if callable(exit_method):
-            try:
-                exit_method(None, None, None)
-                return
-            except Exception:
-                pass
-        close_method = getattr(session, "close", None)
-        if callable(close_method):
-            close_method()
-
-    @staticmethod
-    def _tap_button_if_present(session: wda.Client, label: str, timeout: float) -> bool:
-        """Return ``True`` when a button named ``label`` exists and is clicked."""
-        button = session(text=label)
-        return IOSDevice4._tap_if_exists(button, timeout)
-
-    @staticmethod
-    def _tap_if_exists(element: object, timeout: float) -> bool:
-        exists = getattr(element, "exists", None)
-        if not callable(exists):
-            return False
-
-        try:
-            present = exists(timeout=timeout)
-        except TypeError:
-            present = exists()
-        if not present:
-            return False
-
-        click = getattr(element, "click", None)
-        if not callable(click):
-            return False
-        click()
-        return True
-
-    @staticmethod
-    def _exists_with_timeout(element: object, timeout: float) -> bool:
-        exists = getattr(element, "exists", None)
-        if not callable(exists):
-            return False
-
-        try:
-            return bool(exists(timeout=timeout))
-        except TypeError:
-            return bool(exists())
 
     @staticmethod
     def _validate_normalized_coordinate(value: float, name: str) -> None:

@@ -248,7 +248,7 @@ Higher-level UI helpers built on top of device tooling. Currently only `AndroidU
 
 - IPA/app-directory install via the standalone `ideviceinstaller` CLI when present, otherwise `ios4 ideviceinstaller install`
 - Exact bundle-id checks via `application_listing`
-- Direct native launch via `app_service launch`
+- Direct native launch via `process_control`
 - Launch via WebDriverAgent first, falling back to `process_control`; both carry ordered `argv` and environment values
 - Xcode-compatible snapshots via `memgraph`, defaulting to the last launch PID
 - Tracks the launch PID so `memgraph` can reuse it — `process_control` always reports one, while a WDA launch resolves it best-effort from the WDA app list
