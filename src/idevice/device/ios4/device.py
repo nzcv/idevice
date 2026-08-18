@@ -1,17 +1,13 @@
 """iOS game installation and launch via the Rust ``ios4`` CLI."""
 
 from __future__ import annotations
-
-import contextlib
 import logging
 import re
 import shutil
-import subprocess
 import tempfile
 import threading
 import time
 from pathlib import Path
-from collections.abc import Iterator
 from typing import NoReturn
 import wda
 
@@ -362,19 +358,18 @@ class IOSDevice4(DeviceBase):
 
         if wda.Client(self.wda_url()).is_ready():
             logger.info(f"{_LOG_TAG} WDA already ready on {self.device_id}")
-            return
-
-        logger.info(
-            f"{_LOG_TAG} WDA not ready on {self.device_id}; starting {bundle_id}"
-        )
-        self.launch(bundle_id)
-
-        if not wda.Client(self.wda_url()).wait_ready(timeout=_WDA_READY_TIMEOUT):
-            raise IOSDevice4Error(
-                f"{_LOG_TAG} WDA did not become ready on {self.device_id} "
-                f"within {_WDA_READY_TIMEOUT:g}s after starting {bundle_id}"
+        else:
+            logger.info(
+                f"{_LOG_TAG} WDA not ready on {self.device_id}; starting {bundle_id}"
             )
-        logger.info(f"{_LOG_TAG} WDA ready on {self.device_id}")
+            self.launch(bundle_id)
+
+            if not wda.Client(self.wda_url()).wait_ready(timeout=_WDA_READY_TIMEOUT):
+                raise IOSDevice4Error(
+                    f"{_LOG_TAG} WDA did not become ready on {self.device_id} "
+                    f"within {_WDA_READY_TIMEOUT:g}s after starting {bundle_id}"
+                )
+            logger.info(f"{_LOG_TAG} WDA ready on {self.device_id}")
 
         self.dismiss_message_popup(duration=60*10)
 
@@ -628,10 +623,9 @@ class IOSDevice4(DeviceBase):
         By default this checks once and returns. Pass ``duration`` to keep
         watching for that many seconds, dismissing every popup that appears --
         useful across a launch or login flow that raises several permission
-        prompts. The whole watch reuses one WDA session, and popups that appear
-        while the loop is running are handled as they show up. Use
-        :meth:`start_message_popup_handler` instead when the watch must run in
-        the background rather than block the caller.
+        prompts. The watch runs on a background daemon thread with its own
+        WDA session, so this call returns immediately instead of blocking the
+        caller for the whole ``duration``.
 
         Args:
             button_labels: Labels tried in order. Defaults to a built-in set
@@ -642,12 +636,15 @@ class IOSDevice4(DeviceBase):
                 ``duration`` is ``None``.
 
         Returns:
-            bool: ``True`` when at least one popup was dismissed.
+            bool: When ``duration`` is ``None``, whether a popup was
+            dismissed. When ``duration`` is set, ``True`` once the background
+            watch has started.
 
         Raises:
             ValueError: If ``timeout``, ``interval``, or ``duration`` is not
                 a positive number.
-            IOSDevice4Error: If the WDA session cannot be opened.
+            IOSDevice4Error: If ``duration`` is ``None`` and the WDA session
+                cannot be opened.
         """
         if timeout <= 0:
             raise ValueError("timeout must be a positive number")
@@ -657,16 +654,19 @@ class IOSDevice4(DeviceBase):
             raise ValueError("duration must be a positive number")
 
         labels = self._normalize_message_popup_labels(button_labels)
+        logger.info(f'{labels}')
+        if duration is not None:
+            threading.Thread(
+                target=self._watch_message_popups,
+                args=(labels, timeout, duration, interval),
+                daemon=True,
+            ).start()
+            return True
 
         try:
-            logger.info(f"wda_url: {self.wda_url()}")
             with wda.Client(self.wda_url()).session() as session:
-                if duration is None:
-                    return self._dismiss_message_popup_with_session(
-                        session, labels, timeout
-                    )
-                return self._watch_message_popups(
-                    session, labels, timeout, duration, interval
+                return self._dismiss_message_popup_with_session(
+                    session, labels, timeout
                 )
         except Exception as exc:
             raise IOSDevice4Error(
@@ -676,16 +676,19 @@ class IOSDevice4(DeviceBase):
 
     def _watch_message_popups(
         self,
-        session: wda.Client,
         labels: tuple[str, ...],
         timeout: float,
         duration: float,
         interval: float,
-    ) -> bool:
-        """Dismiss popups for ``duration`` seconds, reusing one WDA session.
+    ) -> None:
+        """Dismiss popups for ``duration`` seconds on a background thread.
 
-        A popup appearing and vanishing between the alert check and the click
-        makes WDA raise, so a failed scan is logged and the watch continues
+        Runs off the caller's thread. Each scan opens its own short-lived WDA
+        session rather than reusing one for the whole duration, so this
+        self-heals when something else on the device (e.g. launching the
+        target app) replaces the active WDA session mid-watch. Any failure --
+        opening the session or a popup appearing and vanishing between the
+        alert check and the click -- is logged and the watch continues
         rather than cutting the requested duration short.
         """
         logger.info(
@@ -696,12 +699,15 @@ class IOSDevice4(DeviceBase):
         dismissed = 0
         while True:
             try:
-                if self._dismiss_message_popup_with_session(session, labels, timeout):
-                    dismissed += 1
+                with wda.Client(self.wda_url()).session() as session:
+                    if self._dismiss_message_popup_with_session(
+                        session, labels, timeout
+                    ):
+                        dismissed += 1
             except Exception as exc:
                 logger.debug(
-                    f"{_LOG_TAG} popup watch ignored transient WDA error on "
-                    f"{self.device_id}: {exc}"
+                    f"{_LOG_TAG} popup watch ignored transient WDA error "
+                    f"on {self.device_id}: {exc}"
                 )
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -712,7 +718,24 @@ class IOSDevice4(DeviceBase):
             f"{_LOG_TAG} Dismissed {dismissed} message popup(s) on "
             f"{self.device_id} over {duration:g}s"
         )
-        return dismissed > 0
+
+    @staticmethod
+    def _dismiss_message_popup_with_session(
+        session: wda.Client, labels: tuple[str, ...], timeout: float
+    ) -> bool:
+        """Click the first known button on an active alert, if any.
+
+        Returns whether a button was clicked.
+        """
+        if not session.alert.exists:
+            return False
+        for label in labels:
+            logger.info(f'{label}')
+            button = session(text=label, timeout=timeout)
+            if button.exists:
+                button.click()
+                return True
+        return False
 
     @staticmethod
     def _normalize_message_popup_labels(
