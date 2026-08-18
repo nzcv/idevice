@@ -419,10 +419,7 @@ def test_stop_uses_wda_first_and_clears_the_tracked_pid(
 ) -> None:
     ios4_device._last_launch_pid = 4815
     ios4_device._last_launch_app_id = APP_ID
-    wda_session = MagicMock()
-    wda_session.__enter__.return_value = wda_session
     wda_client = MagicMock()
-    wda_client.session.return_value = wda_session
 
     with patch(
         "idevice.device.ios4.device.wda.Client", return_value=wda_client
@@ -430,9 +427,11 @@ def test_stop_uses_wda_first_and_clears_the_tracked_pid(
         ios4_device.stop_app()
 
     client.assert_called_once_with(None)
-    wda_client.session.assert_called_once_with()
-    wda_session.app_terminate.assert_called_once_with(APP_ID)
-    wda_session.__exit__.assert_called_once_with(None, None, None)
+    wda_client.app_terminate.assert_called_once_with(APP_ID)
+    # Opening a session displaces the app under test and closing one
+    # terminates it, so neither may happen around an app operation.
+    wda_client.session.assert_not_called()
+    wda_client.close.assert_not_called()
     ios4_device._runner.run.assert_not_called()
     assert ios4_device.last_launch_pid is None
 
@@ -466,20 +465,17 @@ def test_stop_falls_back_to_ios4_when_wda_fails(
     assert ios4_device.last_launch_pid is None
 
 
-def test_stop_closes_wda_session_when_termination_fails(
+def test_stop_falls_back_to_pkill_when_wda_termination_fails(
     ios4_device: IOSDevice4,
 ) -> None:
-    wda_session = MagicMock()
-    wda_session.__enter__.return_value = wda_session
-    wda_session.app_terminate.side_effect = RuntimeError("termination failed")
     wda_client = MagicMock()
-    wda_client.session.return_value = wda_session
+    wda_client.app_terminate.side_effect = RuntimeError("termination failed")
     ios4_device._runner.run.return_value = result(stdout="Killed 4815 (Game)\n")
 
     with patch("idevice.device.ios4.device.wda.Client", return_value=wda_client):
         ios4_device.stop_app()
 
-    assert wda_session.__exit__.call_count == 1
+    wda_client.close.assert_not_called()
     ios4_device._runner.run.assert_called_once_with(
         [BINARY, "--udid", UDID, "pkill", "--bundle", APP_ID],
         check=False,
@@ -491,15 +487,12 @@ def test_stop_keeps_the_tracked_pid_of_another_app(
 ) -> None:
     ios4_device._last_launch_pid = 4815
     ios4_device._last_launch_app_id = APP_ID
-    wda_session = MagicMock()
-    wda_session.__enter__.return_value = wda_session
     wda_client = MagicMock()
-    wda_client.session.return_value = wda_session
 
     with patch("idevice.device.ios4.device.wda.Client", return_value=wda_client):
         ios4_device.stop_app("com.example.other")
 
-    wda_session.__exit__.assert_called_once_with(None, None, None)
+    wda_client.app_terminate.assert_called_once_with("com.example.other")
     assert ios4_device.last_launch_pid == 4815
 
 
@@ -536,14 +529,11 @@ def test_screenshot_uses_the_ios4_screenshot_service(
     assert output.read_bytes() == b"\x89PNG"
 
 
-def test_tap_uses_wda_normalized_coordinates_and_closes_session(
+def test_tap_uses_wda_normalized_coordinates_on_the_live_session(
     ios4_device: IOSDevice4,
 ) -> None:
     ios4_device._device_ip = "192.0.2.10"
-    wda_session = MagicMock()
-    wda_session.__enter__.return_value = wda_session
     wda_client = MagicMock()
-    wda_client.session.return_value = wda_session
 
     with patch(
         "idevice.device.ios4.device.wda.Client", return_value=wda_client
@@ -551,9 +541,11 @@ def test_tap_uses_wda_normalized_coordinates_and_closes_session(
         ios4_device.tap(0, 1, app_id=APP_ID)
 
     client.assert_called_once_with("http://192.0.2.10:8100")
-    wda_client.session.assert_called_once_with()
-    wda_session.click.assert_called_once_with(0.0, 1.0)
-    wda_session.__exit__.assert_called_once_with(None, None, None)
+    wda_client.click.assert_called_once_with(0.0, 1.0)
+    # A tap that opened and closed its own session would kill the app it
+    # was tapping on.
+    wda_client.session.assert_not_called()
+    wda_client.close.assert_not_called()
     ios4_device._runner.run.assert_not_called()
 
 
@@ -582,30 +574,26 @@ def test_tap_rejects_invalid_normalized_coordinates(
     client.assert_not_called()
 
 
-def test_tap_closes_session_and_wraps_wda_failure(
+def test_tap_wraps_wda_failure(
     ios4_device: IOSDevice4,
 ) -> None:
-    wda_session = MagicMock()
-    wda_session.__enter__.return_value = wda_session
-    wda_session.click.side_effect = RuntimeError("tap failed")
     wda_client = MagicMock()
-    wda_client.session.return_value = wda_session
+    wda_client.click.side_effect = RuntimeError("tap failed")
 
     with patch("idevice.device.ios4.device.wda.Client", return_value=wda_client):
         with pytest.raises(IOSDevice4Error, match="WDA failed to tap"):
             ios4_device.tap(0.5, 0.25)
 
-    assert wda_session.__exit__.call_count == 1
+    wda_client.close.assert_not_called()
 
 
 def test_dismiss_message_popup_clicks_known_button_when_alert_is_present(
     ios4_device: IOSDevice4,
 ) -> None:
-    wda_session = MagicMock()
-    wda_session.__enter__.return_value = wda_session
+    wda_client = MagicMock()
     wda_alert = MagicMock()
     wda_alert.exists = True
-    wda_session.alert = wda_alert
+    wda_client.alert = wda_alert
 
     allow_button = MagicMock()
     allow_button.exists = True
@@ -619,9 +607,7 @@ def test_dismiss_message_popup_clicks_known_button_when_alert_is_present(
             return close_button
         return MagicMock()
 
-    wda_session.side_effect = selector
-    wda_client = MagicMock()
-    wda_client.session.return_value = wda_session
+    wda_client.side_effect = selector
 
     with patch(
         "idevice.device.ios4.device.wda.Client", return_value=wda_client
@@ -631,8 +617,8 @@ def test_dismiss_message_popup_clicks_known_button_when_alert_is_present(
         ) is True
 
     client.assert_called_once_with(None)
-    wda_client.session.assert_called_once_with()
-    wda_session.__exit__.assert_called_once_with(None, None, None)
+    wda_client.session.assert_not_called()
+    wda_client.close.assert_not_called()
     allow_button.click.assert_called_once_with()
     close_button.click.assert_not_called()
 
@@ -640,11 +626,10 @@ def test_dismiss_message_popup_clicks_known_button_when_alert_is_present(
 def test_dismiss_message_popup_clicks_network_button_by_default_labels(
     ios4_device: IOSDevice4,
 ) -> None:
-    wda_session = MagicMock()
-    wda_session.__enter__.return_value = wda_session
+    wda_client = MagicMock()
     wda_alert = MagicMock()
     wda_alert.exists = True
-    wda_session.alert = wda_alert
+    wda_client.alert = wda_alert
 
     network_button = MagicMock()
     network_button.exists = True
@@ -663,9 +648,7 @@ def test_dismiss_message_popup_clicks_network_button_by_default_labels(
             return allow_button
         return any_button(**kwargs)
 
-    wda_session.side_effect = selector
-    wda_client = MagicMock()
-    wda_client.session.return_value = wda_session
+    wda_client.side_effect = selector
 
     with patch(
         "idevice.device.ios4.device.wda.Client", return_value=wda_client
@@ -673,8 +656,8 @@ def test_dismiss_message_popup_clicks_network_button_by_default_labels(
         assert ios4_device.dismiss_message_popup(timeout=0.1) is True
 
     client.assert_called_once_with(None)
-    wda_client.session.assert_called_once_with()
-    wda_session.__exit__.assert_called_once_with(None, None, None)
+    wda_client.session.assert_not_called()
+    wda_client.close.assert_not_called()
     network_button.click.assert_called_once_with()
     allow_button.click.assert_not_called()
 
@@ -682,14 +665,10 @@ def test_dismiss_message_popup_clicks_network_button_by_default_labels(
 def test_dismiss_message_popup_returns_false_when_alert_not_present(
     ios4_device: IOSDevice4,
 ) -> None:
-    wda_session = MagicMock()
-    wda_session.__enter__.return_value = wda_session
+    wda_client = MagicMock()
     wda_alert = MagicMock()
     wda_alert.exists = False
-    wda_session.alert = wda_alert
-
-    wda_client = MagicMock()
-    wda_client.session.return_value = wda_session
+    wda_client.alert = wda_alert
 
     with patch(
         "idevice.device.ios4.device.wda.Client", return_value=wda_client
@@ -697,8 +676,8 @@ def test_dismiss_message_popup_returns_false_when_alert_not_present(
         assert ios4_device.dismiss_message_popup(button_labels=["OK"]) is False
 
     client.assert_called_once_with(None)
-    wda_client.session.assert_called_once_with()
-    wda_session.__exit__.assert_called_once_with(None, None, None)
+    wda_client.session.assert_not_called()
+    wda_client.close.assert_not_called()
 
 
 def test_dismiss_message_popup_raises_on_wda_error(
@@ -755,18 +734,14 @@ def test_dismiss_message_popup_with_duration_rejects_non_positive_values(
 def test_watch_message_popups_dismisses_until_duration_elapses(
     ios4_device: IOSDevice4,
 ) -> None:
-    wda_session = MagicMock()
-    wda_session.__enter__.return_value = wda_session
+    wda_client = MagicMock()
     wda_alert = MagicMock()
     wda_alert.exists = True
-    wda_session.alert = wda_alert
+    wda_client.alert = wda_alert
 
     ok_button = MagicMock()
     ok_button.exists = True
-    wda_session.side_effect = lambda **_: ok_button
-
-    wda_client = MagicMock()
-    wda_client.session.return_value = wda_session
+    wda_client.side_effect = lambda **_: ok_button
 
     clock = iter([0.0, 0.5, 1.5])
     with patch(
@@ -778,8 +753,10 @@ def test_watch_message_popups_dismisses_until_duration_elapses(
 
     assert ok_button.click.call_count == 2
     sleep.assert_called_once_with(0.5)
-    assert wda_client.session.call_count == 2
-    assert wda_session.__exit__.call_count == 2
+    # The watch ran twice without ever creating or deleting a session: doing
+    # so on each scan is what used to terminate the app under test.
+    wda_client.session.assert_not_called()
+    wda_client.close.assert_not_called()
 
 
 def test_watch_message_popups_logs_and_returns_when_session_fails(

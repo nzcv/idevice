@@ -379,6 +379,22 @@ class IOSDevice4(DeviceBase):
         """Return the bound WDA base URL, or ``None`` for the client default."""
         return f"http://{self.device_ip}:{_WDA_PORT}" if self.device_ip else None
 
+    def _wda_session(self) -> wda.Client:
+        """Return a client bound to WebDriverAgent's *existing* session.
+
+        Operations on the app under test must never open or close a session
+        of their own. ``POST /session`` displaces the app the previous
+        session launched and ``DELETE /session/{id}`` terminates it, so a
+        helper wrapping its work in ``with client.session() as s:`` kills the
+        app :meth:`launch_app` just started -- which is what the popup watch
+        did to every game it was supposed to be babysitting.
+
+        A bare client resolves ``session_id`` lazily from ``GET /status``,
+        attaching to whichever session is already live and creating one only
+        when the device has none.
+        """
+        return wda.Client(self.wda_url())
+
     def launch(self, app_id: str | None = None) -> None:
         """Launch an app directly through the ios4 ``process_control`` command.
 
@@ -553,8 +569,7 @@ class IOSDevice4(DeviceBase):
     def _stop_app_via_wda(self, app_id: str) -> bool:
         """Return whether WDA accepted an app-termination request."""
         try:
-            with wda.Client(self.wda_url()).session() as session:
-                session.app_terminate(app_id)
+            self._wda_session().app_terminate(app_id)
         except Exception as exc:
             logger.warning(
                 f"{_LOG_TAG} WDA failed to stop {app_id} on {self.device_id}: {exc}"
@@ -613,8 +628,7 @@ class IOSDevice4(DeviceBase):
             f"{_LOG_TAG} Tapping ({x}, {y}) on {self.device_id}{app_context}"
         )
         try:
-            with wda.Client(self.wda_url()).session() as session:
-                session.click(float(x), float(y))
+            self._wda_session().click(float(x), float(y))
         except Exception as exc:
             raise IOSDevice4Error(
                 f"{_LOG_TAG} WDA failed to tap ({x}, {y}) on "
@@ -675,10 +689,9 @@ class IOSDevice4(DeviceBase):
             return True
 
         try:
-            with wda.Client(self.wda_url()).session() as session:
-                return self._dismiss_message_popup_with_session(
-                    session, labels, timeout
-                )
+            return self._dismiss_message_popup_with_session(
+                self._wda_session(), labels, timeout
+            )
         except Exception as exc:
             raise IOSDevice4Error(
                 f"{_LOG_TAG} WDA failed to handle message popup on "
@@ -694,13 +707,13 @@ class IOSDevice4(DeviceBase):
     ) -> None:
         """Dismiss popups for ``duration`` seconds on a background thread.
 
-        Runs off the caller's thread. Each scan opens its own short-lived WDA
-        session rather than reusing one for the whole duration, so this
-        self-heals when something else on the device (e.g. launching the
-        target app) replaces the active WDA session mid-watch. Any failure --
-        opening the session or a popup appearing and vanishing between the
-        alert check and the click -- is logged and the watch continues
-        rather than cutting the requested duration short.
+        Runs off the caller's thread. Each scan attaches to WDA's live
+        session via :meth:`_wda_session` instead of opening its own: a scan
+        that created and deleted a session would terminate the app under
+        test, so the watch used to kill the very app whose popups it was
+        dismissing. Any failure -- a popup appearing and vanishing between
+        the alert check and the click, or a transient WDA error -- is logged
+        and the watch continues rather than cutting the duration short.
         """
         logger.info(
             f"{_LOG_TAG} Watching for message popups on {self.device_id} "
@@ -710,11 +723,10 @@ class IOSDevice4(DeviceBase):
         dismissed = 0
         while True:
             try:
-                with wda.Client(self.wda_url()).session() as session:
-                    if self._dismiss_message_popup_with_session(
-                        session, labels, timeout
-                    ):
-                        dismissed += 1
+                if self._dismiss_message_popup_with_session(
+                    self._wda_session(), labels, timeout
+                ):
+                    dismissed += 1
             except Exception as exc:
                 logger.debug(
                     f"{_LOG_TAG} popup watch ignored transient WDA error "
