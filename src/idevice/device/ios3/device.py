@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,7 +20,7 @@ from idevice.device.base.runner import SubprocessRunner
 from idevice.device.cache import InstalledAppCache, InstalledAppInfo
 from idevice.device.config import device_id as env_device_id
 from idevice.device.config import device_ip as env_device_ip
-from idevice.device.config import ios3_binary
+from idevice.device.config import ideviceinstaller_binary, ios3_binary
 
 logger = logging.getLogger('[IOSDevice3]')
 
@@ -39,7 +40,9 @@ class IOSDevice3(DeviceBase):
     """``DeviceBase`` implementation for iOS using the pymobiledevice3 CLI.
 
     The pymobiledevice3 ``apps`` service handles install/uninstall/list and
-    app-container file transfers, while process control (launch/kill) and
+    app-container file transfers, except that on macOS installation prefers the
+    standalone libimobiledevice ``ideviceinstaller`` CLI when it is present on
+    the host. Process control (launch/kill) and
     WebDriverAgent inspection go through the ``developer dvt`` instrumentation
     APIs. Developer-mode commands require a mounted DeveloperDiskImage and, on
     iOS 17+, an active tunnel (pymobiledevice3 retries with ``--tunnel``).
@@ -82,6 +85,37 @@ class IOSDevice3(DeviceBase):
         """Build a pymobiledevice3 command targeting this device's UDID."""
         return [self._binary, *args, "--udid", self.device_id]
 
+    @staticmethod
+    def _resolve_binary(binary: str) -> str | None:
+        """Return the usable path for ``binary``, or ``None`` when missing."""
+        resolved = shutil.which(binary)
+        if resolved is not None:
+            return resolved
+        return binary if Path(binary).is_file() else None
+
+    def _install_command(self, package_path: Path) -> list[str]:
+        """Build the install command for this host.
+
+        On macOS the standalone libimobiledevice ``ideviceinstaller`` CLI is
+        preferred when it is available; every other host (and macOS without
+        that binary) falls back to ``pymobiledevice3 apps install``.
+        """
+        if sys.platform == "darwin":
+            standalone = self._resolve_binary(ideviceinstaller_binary())
+            if standalone is not None:
+                return [
+                    standalone,
+                    "--udid",
+                    self.device_id,
+                    "install",
+                    str(package_path),
+                ]
+            logger.debug(
+                f"{_LOG_TAG} standalone ideviceinstaller not found; using "
+                "pymobiledevice3 apps install"
+            )
+        return self._command("apps", "install", str(package_path))
+
     def install(self, package_path: Path, app_id: str | None = None) -> bool:
         logger.info(f"{_LOG_TAG} Installing package on iOS device {self.device_id}: {package_path}")
         if not package_path.exists():
@@ -92,7 +126,10 @@ class IOSDevice3(DeviceBase):
         except AppNotInstalledError:
             logger.info(f"{_LOG_TAG} App {app_id} not installed")
         
-        cmd = self._command("apps", "install", str(package_path))
+        cmd = self._install_command(package_path)
+        logger.info(
+            f"{_LOG_TAG} Installing package on {self.device_id} via {cmd[0]}"
+        )
         result = self._runner.run(cmd, timeout=3600)
         if result.returncode != 0:
             return False
