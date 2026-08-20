@@ -261,13 +261,6 @@ class IOSDevice5(Devicectl):
             return backend.host_is_running() if backend else False
 
     def screenshot(self, local: Path | str) -> bool:
-        try:
-            if Devicectl.screenshot(self, local):
-                return True
-        except _DEVICETCL_FAILURES as exc:
-            self._log_fallback("screenshot", exc)
-        else:
-            self._log_fallback("screenshot")
         return self._screenshot_via_ios4(Path(local))
 
     def _screenshot_via_ios4(self, local_path: Path) -> bool:
