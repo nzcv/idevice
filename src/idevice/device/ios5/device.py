@@ -184,7 +184,7 @@ class IOSDevice5(DeviceBase):
       provides it (Xcode 27+), then falls back to ``ios4``.
 
     CoreDevice has no file-removal service. :meth:`documents_rm` therefore
-    clears a directory by replacing its contents with an empty directory;
+    delegates Documents cleanup to the ``ios4`` AFC service;
     :meth:`delete2` remains unsupported. ``swipe`` is also unsupported because
     CoreDevice has no touch-injection service.
     """
@@ -1106,27 +1106,57 @@ class IOSDevice5(DeviceBase):
         self._unsupported("swipe")
 
     def documents_rm(self, app_id: str, remote: str) -> bool:
-        """Clear a directory in an app's Documents sandbox.
-
-        CoreDevice cannot delete files or directories. This operation emulates
-        removal by copying an empty temporary directory over ``remote`` with
-        ``--remove-existing-content true``. The target directory itself remains.
-        """
+        """Recursively remove a path from an app's Documents sandbox via ios4."""
         if not app_id:
             raise ValueError("app_id is required and must be a non-empty string")
         if not remote or not isinstance(remote, str):
             raise ValueError("remote is required and must be a non-empty string")
+
+        configured_binary = ios4_binary()
+        binary = self._resolve_binary(configured_binary)
+        if binary is None:
+            logger.warning(
+                f"{_LOG_TAG} documents_rm needs the `{configured_binary}` CLI; "
+                "install it or set IDEVICE_IOS4_BINARY"
+            )
+            return False
+
+        relative = remote.strip().replace("\\", "/").strip("/")
+        if not relative:
+            raise ValueError("remote is required and must be a non-empty string")
+        parts = [part for part in relative.split("/") if part and part != "."]
+        if any(part == ".." for part in parts):
+            raise ValueError(f"remote path must not contain '..': {remote}")
+        if parts and parts[0] == _DOCUMENTS_ROOT:
+            parts = parts[1:]
+        documents_path = str(PurePosixPath("/", _DOCUMENTS_ROOT, *parts))
+
+        logger.info(
+            f"{_LOG_TAG} Removing {self.device_id}:{documents_path} via ios4"
+        )
         try:
-            with tempfile.TemporaryDirectory(prefix="idevice-ios5-empty-") as empty:
-                self.push(
-                    empty,
-                    remote,
-                    app_id=app_id,
-                    documents_only=True,
-                    remove_existing_content=True,
-                )
-        except IOSDevice5Error as exc:
+            result = self._runner.run(
+                [
+                    binary,
+                    "--udid",
+                    self.device_id,
+                    "afc",
+                    "--documents",
+                    app_id,
+                    "remove_all",
+                    documents_path,
+                ],
+                check=False,
+                timeout=_INSTALL_TIMEOUT,
+            )
+        except CommandExecutionError as exc:
             logger.warning(f"{_LOG_TAG} documents_rm failed: {exc}")
+            return False
+        if result.returncode != 0:
+            logger.warning(
+                f"{_LOG_TAG} documents_rm failed on {self.device_id}: "
+                f"returncode={result.returncode}, stderr={result.stderr!r}"
+            )
             return False
         return True
 

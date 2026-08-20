@@ -760,37 +760,66 @@ def test_ls_reports_a_failed_listing(ios5_device: IOSDevice5) -> None:
         ios5_device.ls("Documents", app_id=APP_ID)
 
 
-def test_documents_rm_replaces_the_directory_with_an_empty_directory(
+def test_documents_rm_recursively_removes_the_path_via_ios4(
     ios5_device: IOSDevice5,
 ) -> None:
-    source_paths: list[Path] = []
-
-    def run(arguments: list[str], **_kwargs: Any) -> DevicectlOutcome:
-        source = Path(arguments[arguments.index("--source") + 1])
-        assert source.is_dir()
-        assert list(source.iterdir()) == []
-        source_paths.append(source)
-        return outcome({})
-
-    ios5_device._run = MagicMock(side_effect=run)
-
-    assert ios5_device.documents_rm(APP_ID, "saves") is True
-
-    command = command_of(ios5_device._run, 0)
-    assert command[:3] == ["device", "copy", "to"]
-    assert command[command.index("--destination") + 1] == "Documents/saves"
-    assert command[command.index("--remove-existing-content") + 1] == "true"
-    assert source_paths[0].exists() is False
-
-
-def test_documents_rm_reports_a_failed_replacement(
-    ios5_device: IOSDevice5,
-) -> None:
-    ios5_device._run = MagicMock(
-        return_value=outcome(returncode=1, error="Could not copy directory")
+    ios5_device._runner.run.return_value = CommandResult(
+        returncode=0, stdout="", stderr=""
     )
 
-    assert ios5_device.documents_rm(APP_ID, "saves") is False
+    with patch(
+        "idevice.device.ios5.device.shutil.which", return_value=IOS4_BINARY
+    ):
+        assert ios5_device.documents_rm(APP_ID, "Documents/saves") is True
+
+    ios5_device._runner.run.assert_called_once_with(
+        [
+            IOS4_BINARY,
+            "--udid",
+            UDID,
+            "afc",
+            "--documents",
+            APP_ID,
+            "remove_all",
+            "/Documents/saves",
+        ],
+        check=False,
+        timeout=3600,
+    )
+
+
+def test_documents_rm_reports_a_failed_ios4_command(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios5_device._runner.run.return_value = CommandResult(
+        returncode=1, stdout="", stderr="Could not remove directory"
+    )
+
+    with patch(
+        "idevice.device.ios5.device.shutil.which", return_value=IOS4_BINARY
+    ):
+        assert ios5_device.documents_rm(APP_ID, "saves") is False
+
+
+def test_documents_rm_reports_a_missing_ios4_cli(
+    ios5_device: IOSDevice5,
+) -> None:
+    with patch("idevice.device.ios5.device.shutil.which", return_value=None):
+        assert ios5_device.documents_rm(APP_ID, "saves") is False
+
+    ios5_device._runner.run.assert_not_called()
+
+
+def test_documents_rm_rejects_parent_path_segments(
+    ios5_device: IOSDevice5,
+) -> None:
+    with patch(
+        "idevice.device.ios5.device.shutil.which", return_value=IOS4_BINARY
+    ):
+        with pytest.raises(ValueError, match="must not contain"):
+            ios5_device.documents_rm(APP_ID, "saves/../Library")
+
+    ios5_device._runner.run.assert_not_called()
 
 
 def test_operations_without_a_coredevice_service_are_unsupported(

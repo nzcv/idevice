@@ -26,7 +26,7 @@ macOS and HarmonyOS are not implemented yet.
   - **iOS (go-ios):** `ios`
   - **iOS (pymobiledevice3):** `pymobiledevice3` (default: `/opt/ios3/bin/pymobiledevice3` on Unix, `~/ios3/bin/pymobiledevice3.exe` on Windows)
   - **iOS (ios4):** `ios4` (or set `IDEVICE_IOS4_BINARY`); optionally `ideviceinstaller` for installs (or set `IDEVICE_IDEVICEINSTALLER_BINARY`)
-  - **iOS (devicectl):** `xcrun` from Xcode, macOS only (or set `IDEVICE_XCRUN_BINARY`); `ios4` is still needed for `capture_memgraph`
+  - **iOS (devicectl):** `xcrun` from Xcode, macOS only (or set `IDEVICE_XCRUN_BINARY`); `ios4` is still needed for `capture_memgraph` and `documents_rm`
   - **Android:** `adb`
 
 Python packages `pymobiledevice3` and `uiautomator2` are installed automatically with the project (see [Install](#install)). `IOSDevice3` uses the pymobiledevice3 Python library for Documents sandbox access (`documents_*`); other iOS operations go through the CLI.
@@ -216,7 +216,7 @@ Every platform implementation shares the same interface:
 - `package_name` — default app id set at `Device.create` / `Device.from_env` (`GAUTO_PACKAGE_NAME`)
 - `push(local, remote, app_id=None, documents_only=False)` / `pull(remote, local, app_id=None, documents_only=True)` — host ↔ device file transfer
 - `ls(remote, app_id=None, recursive=False)` — list a remote directory on the device
-- `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox; on `IOSDevice5`, `documents_rm` clears a directory's contents but retains the directory because CoreDevice has no delete command
+- `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox; `IOSDevice5.documents_rm` delegates recursive removal to the `ios4` AFC service because CoreDevice has no delete command
 - `swipe(x1, y1, x2, y2, duration_ms=300)` — touch gesture (Android implemented; iOS/Windows raise `NotImplementedError`)
 - `tap(x, y, app_id=None)` — normalized touch input, implemented by `IOSDevice4` through WebDriverAgent
 - `screenshot(local)` — capture the screen to a host file
@@ -270,7 +270,7 @@ CoreDevice CLI, so it needs macOS with Xcode but no third-party binary:
 - App data container transfers via `device copy to` / `device copy from` and listing via `device info files`, including the Documents sandbox; directory pushes can pass `remove_existing_content=True` to replace the destination contents
 - Screen capture via `device capture screenshot` on Xcode 27+, falling back to `ios4`
 - `capture_memgraph` shells out to `ios4`: CoreDevice exposes no memory-graph service
-- `documents_rm` clears a directory by copying an empty directory with `--remove-existing-content true`; CoreDevice retains the target directory because it has no file-removal command
+- `documents_rm` recursively removes a Documents path through `ios4 afc --documents <bundle-id> remove_all`
 - `delete2` and `swipe` raise `NotImplementedError` — CoreDevice has no general file-removal or touch-injection service
 
 Every command is parsed from devicectl's JSON output, the only interface Apple
@@ -342,7 +342,7 @@ Environment variables override default binary paths:
 |----------|---------|---------|
 | `IDEVICE_IOS_BINARY` | `ios` | `IOSDevice` |
 | `IDEVICE_IOS3_BINARY` | `/opt/ios3/bin/pymobiledevice3` (Unix) / `~/ios3/bin/pymobiledevice3.exe` (Windows) | `IOSDevice3` |
-| `IDEVICE_IOS4_BINARY` | `ios4` (`ios4.exe` on Windows) | `IOSDevice4`, `IOSDevice5.capture_memgraph` |
+| `IDEVICE_IOS4_BINARY` | `ios4` (`ios4.exe` on Windows) | `IOSDevice4`, `IOSDevice5.capture_memgraph`, `IOSDevice5.documents_rm` |
 | `IDEVICE_IDEVICEINSTALLER_BINARY` | `ideviceinstaller` (`ideviceinstaller.exe` on Windows) | `IOSDevice4.install` (falls back to `ios4` when missing) |
 | `IDEVICE_XCRUN_BINARY` | `xcrun` | `IOSDevice5` |
 | `IDEVICE_ADB_BINARY` | `adb` | `AndroidDevice`, `AndroidUIAuto` |
