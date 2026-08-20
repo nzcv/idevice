@@ -1100,6 +1100,11 @@ class IOSDevice5(DeviceBase):
             or duration <= 0
         ):
             raise ValueError("duration must be a positive finite number")
+        logger.info(
+            "%s Starting iwda2 dialog monitor for %s seconds",
+            _LOG_TAG,
+            duration,
+        )
         return self._request_iwda2_monitor(
             "/api/monitor/start",
             params={"duration": format(float(duration), "g")},
@@ -1121,6 +1126,7 @@ class IOSDevice5(DeviceBase):
             return False
 
         url = f"http://{device_ip}:{_IWDA2_PORT}{route}"
+        logger.info("%s Calling iwda2 monitor endpoint: GET %s", _LOG_TAG, url)
         try:
             response = requests.get(
                 url, params=params, timeout=_IWDA2_HTTP_TIMEOUT
