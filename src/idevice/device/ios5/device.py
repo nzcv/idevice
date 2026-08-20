@@ -1162,20 +1162,16 @@ class IOSDevice5(DeviceBase):
             )
 
     def documents_rm(self, app_id: str, remote: str) -> bool:
-        """Recursively remove a path from an app's Documents sandbox via ios4."""
+        """Idempotently remove a Documents path via devicectl and ios4.
+
+        CoreDevice is used to check that the target exists before invoking
+        ``ios4 remove_all`` because ios4 aborts on AFC ``ObjectNotFound``.
+        A target that is already absent is considered successfully cleaned.
+        """
         if not app_id:
             raise ValueError("app_id is required and must be a non-empty string")
         if not remote or not isinstance(remote, str):
             raise ValueError("remote is required and must be a non-empty string")
-
-        configured_binary = ios4_binary()
-        binary = self._resolve_binary(configured_binary)
-        if binary is None:
-            logger.warning(
-                f"{_LOG_TAG} documents_rm needs the `{configured_binary}` CLI; "
-                "install it or set IDEVICE_IOS4_BINARY"
-            )
-            return False
 
         relative = remote.strip().replace("\\", "/").strip("/")
         if not relative:
@@ -1186,6 +1182,37 @@ class IOSDevice5(DeviceBase):
         if parts and parts[0] == _DOCUMENTS_ROOT:
             parts = parts[1:]
         documents_path = str(PurePosixPath("/", _DOCUMENTS_ROOT, *parts))
+
+        current = PurePosixPath(_DOCUMENTS_ROOT)
+        for part in parts:
+            entries = self._list_container(
+                app_id,
+                str(current),
+                documents_only=False,
+                recursive=False,
+            )
+            if entries is None:
+                logger.warning(
+                    f"{_LOG_TAG} Cannot inspect {self.device_id}:{current} "
+                    "before documents_rm"
+                )
+                return False
+            if not any(PurePosixPath(entry).name == part for entry in entries):
+                logger.info(
+                    f"{_LOG_TAG} {self.device_id}:{documents_path} is already "
+                    "absent"
+                )
+                return True
+            current /= part
+
+        configured_binary = ios4_binary()
+        binary = self._resolve_binary(configured_binary)
+        if binary is None:
+            logger.warning(
+                f"{_LOG_TAG} documents_rm needs the `{configured_binary}` CLI; "
+                "install it or set IDEVICE_IOS4_BINARY"
+            )
+            return False
 
         logger.info(
             f"{_LOG_TAG} Removing {self.device_id}:{documents_path} via ios4"
@@ -1209,6 +1236,12 @@ class IOSDevice5(DeviceBase):
             logger.warning(f"{_LOG_TAG} documents_rm failed: {exc}")
             return False
         if result.returncode != 0:
+            if "Afc(ObjectNotFound)" in result.stderr:
+                logger.info(
+                    f"{_LOG_TAG} {self.device_id}:{documents_path} disappeared "
+                    "before ios4 removal"
+                )
+                return True
             logger.warning(
                 f"{_LOG_TAG} documents_rm failed on {self.device_id}: "
                 f"returncode={result.returncode}, stderr={result.stderr!r}"

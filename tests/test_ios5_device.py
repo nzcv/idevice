@@ -864,6 +864,9 @@ def test_ls_reports_a_failed_listing(ios5_device: IOSDevice5) -> None:
 def test_documents_rm_recursively_removes_the_path_via_ios4(
     ios5_device: IOSDevice5,
 ) -> None:
+    ios5_device._run = MagicMock(
+        return_value=outcome({"files": [{"path": "Documents/saves"}]})
+    )
     ios5_device._runner.run.return_value = CommandResult(
         returncode=0, stdout="", stderr=""
     )
@@ -889,9 +892,65 @@ def test_documents_rm_recursively_removes_the_path_via_ios4(
     )
 
 
+def test_documents_rm_treats_an_absent_path_as_success(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios5_device._run = MagicMock(return_value=outcome({"files": []}))
+
+    with patch("idevice.device.ios5.device.shutil.which", return_value=None):
+        assert ios5_device.documents_rm(APP_ID, "Memory") is True
+
+    command = command_of(ios5_device._run, 0)
+    assert command[:3] == ["device", "info", "files"]
+    assert command[command.index("--subdirectory") + 1] == "Documents"
+    ios5_device._runner.run.assert_not_called()
+
+
+def test_documents_rm_checks_nested_paths_one_level_at_a_time(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios5_device._run = MagicMock(
+        side_effect=[
+            outcome({"files": [{"path": "Documents/Logs"}]}),
+            outcome({"files": []}),
+        ]
+    )
+
+    with patch(
+        "idevice.device.ios5.device.shutil.which", return_value=IOS4_BINARY
+    ):
+        assert ios5_device.documents_rm(APP_ID, "Logs/archive") is True
+
+    assert command_of(ios5_device._run, 0)[
+        command_of(ios5_device._run, 0).index("--subdirectory") + 1
+    ] == "Documents"
+    assert command_of(ios5_device._run, 1)[
+        command_of(ios5_device._run, 1).index("--subdirectory") + 1
+    ] == "Documents/Logs"
+    ios5_device._runner.run.assert_not_called()
+
+
+def test_documents_rm_reports_a_failed_existence_check(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios5_device._run = MagicMock(
+        return_value=outcome(returncode=1, error="File service unavailable")
+    )
+
+    with patch(
+        "idevice.device.ios5.device.shutil.which", return_value=IOS4_BINARY
+    ):
+        assert ios5_device.documents_rm(APP_ID, "saves") is False
+
+    ios5_device._runner.run.assert_not_called()
+
+
 def test_documents_rm_reports_a_failed_ios4_command(
     ios5_device: IOSDevice5,
 ) -> None:
+    ios5_device._run = MagicMock(
+        return_value=outcome({"files": [{"path": "Documents/saves"}]})
+    )
     ios5_device._runner.run.return_value = CommandResult(
         returncode=1, stdout="", stderr="Could not remove directory"
     )
@@ -902,9 +961,31 @@ def test_documents_rm_reports_a_failed_ios4_command(
         assert ios5_device.documents_rm(APP_ID, "saves") is False
 
 
+def test_documents_rm_treats_ios4_object_not_found_race_as_success(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios5_device._run = MagicMock(
+        return_value=outcome({"files": [{"path": "Documents/saves"}]})
+    )
+    ios5_device._runner.run.return_value = CommandResult(
+        returncode=-6,
+        stdout="",
+        stderr="Failed to remove: Afc(ObjectNotFound)",
+    )
+
+    with patch(
+        "idevice.device.ios5.device.shutil.which", return_value=IOS4_BINARY
+    ):
+        assert ios5_device.documents_rm(APP_ID, "saves") is True
+
+
 def test_documents_rm_reports_a_missing_ios4_cli(
     ios5_device: IOSDevice5,
 ) -> None:
+    ios5_device._run = MagicMock(
+        return_value=outcome({"files": [{"path": "Documents/saves"}]})
+    )
+
     with patch("idevice.device.ios5.device.shutil.which", return_value=None):
         assert ios5_device.documents_rm(APP_ID, "saves") is False
 
