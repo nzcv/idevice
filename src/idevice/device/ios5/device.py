@@ -183,8 +183,10 @@ class IOSDevice5(DeviceBase):
     * :meth:`screenshot` uses ``device capture screenshot`` where Xcode
       provides it (Xcode 27+), then falls back to ``ios4``.
 
-    File removal (``documents_rm``, ``delete2``) and ``swipe`` stay
-    unimplemented because CoreDevice offers no matching service.
+    CoreDevice has no file-removal service. :meth:`documents_rm` therefore
+    clears a directory by replacing its contents with an empty directory;
+    :meth:`delete2` remains unsupported. ``swipe`` is also unsupported because
+    CoreDevice has no touch-injection service.
     """
 
     def __init__(
@@ -843,8 +845,18 @@ class IOSDevice5(DeviceBase):
         *,
         app_id: str | None = None,
         documents_only: bool = False,
+        remove_existing_content: bool = False,
     ) -> None:
         """Copy a host file or directory into the app data container.
+
+        Args:
+            local: Path to the local file or directory.
+            remote: Destination path relative to the selected container scope.
+            app_id: Bundle id, defaulting to the id bound to this device.
+            documents_only: Scope ``remote`` to the app's Documents directory.
+            remove_existing_content: Remove the destination directory's
+                existing contents before copying ``local``. CoreDevice only
+                applies this option when ``local`` is a directory.
 
         Raises:
             ValueError: If ``remote`` is empty.
@@ -856,6 +868,11 @@ class IOSDevice5(DeviceBase):
             raise FileNotFoundError(f"Local path not found: {local_path}")
         target = self._resolve_app_id(app_id)
         destination = self._container_path(remote, documents_only=documents_only)
+        replacement = (
+            ["--remove-existing-content", "true"]
+            if remove_existing_content
+            else []
+        )
         outcome = self._run(
             self._command(
                 ["device", "copy", "to"],
@@ -864,6 +881,7 @@ class IOSDevice5(DeviceBase):
                 str(local_path),
                 "--destination",
                 destination,
+                *replacement,
             ),
             timeout=_INSTALL_TIMEOUT,
         )
@@ -1023,12 +1041,29 @@ class IOSDevice5(DeviceBase):
             return False
         return True
 
-    def documents_push(self, app_id: str, local: Path | str, remote: str) -> bool:
-        """Push a local file or directory into an app's Documents sandbox."""
+    def documents_push(
+        self,
+        app_id: str,
+        local: Path | str,
+        remote: str,
+        *,
+        remove_existing_content: bool = False,
+    ) -> bool:
+        """Push a local file or directory into an app's Documents sandbox.
+
+        Set ``remove_existing_content`` when copying a directory to replace
+        the destination directory's contents instead of merging into it.
+        """
         if not app_id:
             raise ValueError("app_id is required and must be a non-empty string")
         try:
-            self.push(local, remote, app_id=app_id, documents_only=True)
+            self.push(
+                local,
+                remote,
+                app_id=app_id,
+                documents_only=True,
+                remove_existing_content=remove_existing_content,
+            )
         except FileNotFoundError:
             logger.warning(f"{_LOG_TAG} documents_push source not found: {local}")
             return False
@@ -1071,8 +1106,29 @@ class IOSDevice5(DeviceBase):
         self._unsupported("swipe")
 
     def documents_rm(self, app_id: str, remote: str) -> bool:
-        del app_id, remote
-        self._unsupported("documents_rm")
+        """Clear a directory in an app's Documents sandbox.
+
+        CoreDevice cannot delete files or directories. This operation emulates
+        removal by copying an empty temporary directory over ``remote`` with
+        ``--remove-existing-content true``. The target directory itself remains.
+        """
+        if not app_id:
+            raise ValueError("app_id is required and must be a non-empty string")
+        if not remote or not isinstance(remote, str):
+            raise ValueError("remote is required and must be a non-empty string")
+        try:
+            with tempfile.TemporaryDirectory(prefix="idevice-ios5-empty-") as empty:
+                self.push(
+                    empty,
+                    remote,
+                    app_id=app_id,
+                    documents_only=True,
+                    remove_existing_content=True,
+                )
+        except IOSDevice5Error as exc:
+            logger.warning(f"{_LOG_TAG} documents_rm failed: {exc}")
+            return False
+        return True
 
     def delete2(self, data_path: AppDataPath, remote: str) -> bool:
         del data_path, remote

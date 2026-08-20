@@ -216,7 +216,7 @@ Every platform implementation shares the same interface:
 - `package_name` — default app id set at `Device.create` / `Device.from_env` (`GAUTO_PACKAGE_NAME`)
 - `push(local, remote, app_id=None, documents_only=False)` / `pull(remote, local, app_id=None, documents_only=True)` — host ↔ device file transfer
 - `ls(remote, app_id=None, recursive=False)` — list a remote directory on the device
-- `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox, supporting both files and directories (implemented on `IOSDevice3`, `IOSDevice4` and `WindowsDevice`, and all but `documents_rm` on `IOSDevice5`; other platforms raise `NotImplementedError`)
+- `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox; on `IOSDevice5`, `documents_rm` clears a directory's contents but retains the directory because CoreDevice has no delete command
 - `swipe(x1, y1, x2, y2, duration_ms=300)` — touch gesture (Android implemented; iOS/Windows raise `NotImplementedError`)
 - `tap(x, y, app_id=None)` — normalized touch input, implemented by `IOSDevice4` through WebDriverAgent
 - `screenshot(local)` — capture the screen to a host file
@@ -267,10 +267,11 @@ CoreDevice CLI, so it needs macOS with Xcode but no third-party binary:
 - Exact bundle-id checks via `device info apps --bundle-id`
 - Launch via `device process launch`, with the environment as a JSON dictionary and `argv` as real positional arguments
 - Stop by resolving the bundle's processes in `device info processes` and terminating each with `device process terminate --kill`
-- App data container transfers via `device copy to` / `device copy from` and listing via `device info files`, including the Documents sandbox
+- App data container transfers via `device copy to` / `device copy from` and listing via `device info files`, including the Documents sandbox; directory pushes can pass `remove_existing_content=True` to replace the destination contents
 - Screen capture via `device capture screenshot` on Xcode 27+, falling back to `ios4`
 - `capture_memgraph` shells out to `ios4`: CoreDevice exposes no memory-graph service
-- `documents_rm`, `delete2` and `swipe` raise `NotImplementedError` — CoreDevice has no file-removal or touch-injection service
+- `documents_rm` clears a directory by copying an empty directory with `--remove-existing-content true`; CoreDevice retains the target directory because it has no file-removal command
+- `delete2` and `swipe` raise `NotImplementedError` — CoreDevice has no general file-removal or touch-injection service
 
 Every command is parsed from devicectl's JSON output, the only interface Apple
 guarantees to keep stable, and errors surface as the flattened

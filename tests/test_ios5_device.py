@@ -656,6 +656,32 @@ def test_push_scopes_the_transfer_to_the_documents_sandbox(
     assert command[command.index("--domain-type") + 1] == "appDataContainer"
     assert command[command.index("--domain-identifier") + 1] == APP_ID
     assert command[command.index("--destination") + 1] == "Documents/saves/save.json"
+    assert "--remove-existing-content" not in command
+
+
+def test_push_can_replace_a_documents_directory(
+    ios5_device: IOSDevice5, tmp_path: Path
+) -> None:
+    payload = tmp_path / "saves"
+    payload.mkdir()
+    (payload / "save.json").write_text("{}", encoding="utf-8")
+    ios5_device._run = MagicMock(return_value=outcome({}))
+
+    assert (
+        ios5_device.documents_push(
+            APP_ID,
+            payload,
+            "saves",
+            remove_existing_content=True,
+        )
+        is True
+    )
+
+    command = command_of(ios5_device._run, 0)
+    assert command[:3] == ["device", "copy", "to"]
+    assert command[command.index("--source") + 1] == str(payload)
+    assert command[command.index("--destination") + 1] == "Documents/saves"
+    assert command[command.index("--remove-existing-content") + 1] == "true"
 
 
 def test_pull_reads_the_container_root_for_local_app_data(
@@ -734,6 +760,39 @@ def test_ls_reports_a_failed_listing(ios5_device: IOSDevice5) -> None:
         ios5_device.ls("Documents", app_id=APP_ID)
 
 
+def test_documents_rm_replaces_the_directory_with_an_empty_directory(
+    ios5_device: IOSDevice5,
+) -> None:
+    source_paths: list[Path] = []
+
+    def run(arguments: list[str], **_kwargs: Any) -> DevicectlOutcome:
+        source = Path(arguments[arguments.index("--source") + 1])
+        assert source.is_dir()
+        assert list(source.iterdir()) == []
+        source_paths.append(source)
+        return outcome({})
+
+    ios5_device._run = MagicMock(side_effect=run)
+
+    assert ios5_device.documents_rm(APP_ID, "saves") is True
+
+    command = command_of(ios5_device._run, 0)
+    assert command[:3] == ["device", "copy", "to"]
+    assert command[command.index("--destination") + 1] == "Documents/saves"
+    assert command[command.index("--remove-existing-content") + 1] == "true"
+    assert source_paths[0].exists() is False
+
+
+def test_documents_rm_reports_a_failed_replacement(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios5_device._run = MagicMock(
+        return_value=outcome(returncode=1, error="Could not copy directory")
+    )
+
+    assert ios5_device.documents_rm(APP_ID, "saves") is False
+
+
 def test_operations_without_a_coredevice_service_are_unsupported(
     ios5_device: IOSDevice5,
 ) -> None:
@@ -741,7 +800,5 @@ def test_operations_without_a_coredevice_service_are_unsupported(
         ios5_device.tap(0.5, 0.5)
     with pytest.raises(NotImplementedError, match="swipe"):
         ios5_device.swipe(0, 0, 10, 10)
-    with pytest.raises(NotImplementedError, match="documents_rm"):
-        ios5_device.documents_rm(APP_ID, "saves")
     with pytest.raises(NotImplementedError, match="delete2"):
         ios5_device.delete2(AppDataPath.Persistent, "saves")
