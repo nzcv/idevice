@@ -9,6 +9,7 @@ import pytest
 
 from idevice.device.base.errors import AppNotInstalledError, DeviceNotFoundError
 from idevice.device.base.runner import CommandResult
+from idevice.device.common.ios4cli import IOS4CLI
 from idevice.device.ios4.device import IOSDevice4, IOSDevice4Error
 
 APP_ID = "com.example.game"
@@ -32,6 +33,14 @@ def ios4_device(tmp_path: Path) -> IOSDevice4:
             )
     device._runner = MagicMock()
     return device
+
+
+def test_ios4_device_composes_the_common_ios4cli(
+    ios4_device: IOSDevice4,
+) -> None:
+    assert isinstance(ios4_device._ios4cli, IOS4CLI)
+    assert not issubclass(IOS4CLI, IOSDevice4)
+    assert ios4_device._runner is ios4_device._ios4cli.runner
 
 
 def result(

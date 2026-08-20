@@ -17,6 +17,7 @@ from idevice.device.base.errors import (
     DeviceNotFoundError,
 )
 from idevice.device.base.runner import CommandResult
+from idevice.device.common.ios4cli import IOS4CLI
 from idevice.device.ios5.device import (
     DevicectlOutcome,
     IOSDevice5,
@@ -80,6 +81,16 @@ def test_construction_requires_xcrun(tmp_path: Path) -> None:
         with patch("idevice.device.ios5.device.shutil.which", return_value=None):
             with pytest.raises(IOSDevice5Error, match="CLI not found"):
                 IOSDevice5(UDID, cache_dir=tmp_path)
+
+
+def test_ios5_uses_the_common_ios4cli_type(ios5_device: IOSDevice5) -> None:
+    with patch(
+        "idevice.device.ios5.device.shutil.which", return_value=IOS4_BINARY
+    ):
+        backend = ios5_device._ios4cli()
+
+    assert isinstance(backend, IOS4CLI)
+    assert backend.runner is ios5_device._runner
 
 
 def test_run_parses_json_document_and_removes_temporary_file(
@@ -285,6 +296,39 @@ def test_install_returns_false_on_a_devicectl_error(
 
     assert ios5_device.install(ipa, app_id=APP_ID) is False
     assert ios5_device._app_cache.get(APP_ID) is None
+
+
+def test_install_falls_back_to_ios4_after_devicectl_failure(
+    ios5_device: IOSDevice5, tmp_path: Path
+) -> None:
+    ipa = tmp_path / "ExampleGame.ipa"
+    ipa.write_bytes(b"ipa")
+    ios5_device._run = MagicMock(
+        return_value=outcome(returncode=1, error="The tunnel was interrupted.")
+    )
+    ios4cli = MagicMock()
+    ios4cli.install.return_value = True
+    ios5_device._ios4cli = MagicMock(return_value=ios4cli)
+
+    assert ios5_device.install(ipa, app_id=APP_ID) is True
+
+    ios4cli.install.assert_called_once_with(ipa, APP_ID)
+
+
+def test_is_installed_falls_back_only_when_devicectl_fails(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios4cli = MagicMock()
+    ios4cli.is_installed.return_value = True
+    ios5_device._ios4cli = MagicMock(return_value=ios4cli)
+    ios5_device._run = MagicMock(return_value=outcome({"apps": []}))
+
+    assert ios5_device.is_installed(APP_ID) is False
+    ios4cli.is_installed.assert_not_called()
+
+    ios5_device._run.return_value = outcome(returncode=1, error="device offline")
+    assert ios5_device.is_installed(APP_ID) is True
+    ios4cli.is_installed.assert_called_once_with(APP_ID)
 
 
 def test_install_rejects_missing_package(
@@ -890,6 +934,20 @@ def test_documents_rm_copies_ios4_directory_removal_workflow(
         call([*prefix, "info", "/Documents/saves"], check=False),
         call([*prefix, "remove_all", "/Documents/saves"], check=False),
     ]
+
+
+def test_documents_rm_routes_directly_to_ios4(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios4cli = MagicMock()
+    ios4cli.documents_rm.return_value = True
+    ios5_device._ios4cli = MagicMock(return_value=ios4cli)
+    ios5_device._run = MagicMock()
+
+    assert ios5_device.documents_rm(APP_ID, "saves") is True
+
+    ios4cli.documents_rm.assert_called_once_with(APP_ID, "saves")
+    ios5_device._run.assert_not_called()
 
 
 def test_documents_rm_uses_ios4_remove_for_a_file(

@@ -15,9 +15,10 @@ from typing import NoReturn
 import wda
 
 from idevice.device.base.device import AppDataPath, DeviceBase
-from idevice.device.base.errors import AppNotInstalledError, DeviceNotFoundError
+from idevice.device.base.errors import AppNotInstalledError
 from idevice.device.base.runner import CommandResult, SubprocessRunner
 from idevice.device.cache import InstalledAppCache, InstalledAppInfo
+from idevice.device.common.ios4cli import IOS4CLI
 from idevice.device.config import device_id as env_device_id
 from idevice.device.config import device_ip as env_device_ip
 from idevice.device.config import ideviceinstaller_binary, ios4_binary
@@ -37,9 +38,6 @@ _DOCUMENTS_DIR_IFMT = "S_IFDIR"
 _DOCUMENTS_FILE_IFMT = "S_IFREG"
 _DOCUMENTS_IFMT_PATTERN = re.compile(r'st_ifmt:\s*"(\w+)"')
 _DOCUMENTS_LIST_ENTRY_PATTERN = re.compile(r'^\s*"((?:[^"\\]|\\.)*)",?\s*$')
-_UDID_PATTERN = re.compile(
-    r'UniqueDeviceID["\']?\s*:\s*String\(\s*"([^"\\]+)"\s*,?\s*\)'
-)
 _WDA_PROCESS_MARKERS = ("webdriveragent", "xctrunner")
 _WDA_PORT = 8100
 _WDA_READY_TIMEOUT = 60.0
@@ -105,9 +103,14 @@ class IOSDevice4(DeviceBase):
         super().__init__(
             device_id, device_ip, platform="ios4", package_name=package_name
         )
-        self._binary = ios4_binary()
-        self._runner = SubprocessRunner()
         self._app_cache = InstalledAppCache(device_id, cache_dir=cache_dir)
+        self._ios4cli = IOS4CLI(
+            device_id,
+            binary=ios4_binary(),
+            runner=SubprocessRunner(),
+            app_cache=self._app_cache,
+            cache_dir=cache_dir,
+        )
         self._last_launch_pid: int | None = None
         self._last_launch_app_id = ""
         if self._resolve_binary(self._binary) is None:
@@ -122,6 +125,24 @@ class IOSDevice4(DeviceBase):
         """Return the PID from the most recent successful launch."""
         return self._last_launch_pid
 
+    @property
+    def _binary(self) -> str:
+        """Compatibility alias for the composed CLI binary."""
+        return self._ios4cli.binary
+
+    @_binary.setter
+    def _binary(self, value: str) -> None:
+        self._ios4cli.binary = value
+
+    @property
+    def _runner(self) -> SubprocessRunner:
+        """Compatibility alias for the composed CLI runner."""
+        return self._ios4cli.runner
+
+    @_runner.setter
+    def _runner(self, value: SubprocessRunner) -> None:
+        self._ios4cli.runner = value
+
     @classmethod
     def from_env(cls) -> IOSDevice4:
         """Build an :class:`IOSDevice4` from the ``GAUTO_*`` environment."""
@@ -134,18 +155,13 @@ class IOSDevice4(DeviceBase):
     @classmethod
     def default_udid(cls) -> str:
         """Return the first connected device UDID reported by ios4."""
-        command = [ios4_binary(), "ideviceinfo"]
-        result = SubprocessRunner().run(command)
-        match = _UDID_PATTERN.search(result.stdout)
-        if match is None:
-            raise DeviceNotFoundError(
-                f"{_LOG_TAG} Could not read UniqueDeviceID from ideviceinfo output"
-            )
-        return match.group(1)
+        return IOS4CLI.default_udid(
+            binary=ios4_binary(), runner=SubprocessRunner()
+        )
 
     def _command(self, *arguments: str) -> list[str]:
         """Build an ios4 command for the bound device."""
-        return [self._binary, "--udid", self.device_id, *arguments]
+        return self._ios4cli.command(*arguments)
 
     @staticmethod
     def _resolve_binary(binary: str) -> str | None:
@@ -260,16 +276,14 @@ class IOSDevice4(DeviceBase):
         if not app_id:
             raise ValueError("app_id is required and must be a non-empty string")
         logger.info(f"{_LOG_TAG} Uninstalling {app_id} on {self.device_id}")
-        self._runner.run(self._command("app_service", "uninstall", app_id))
+        self._ios4cli.run("app_service", "uninstall", app_id)
         self._app_cache.remove(app_id)
 
     def is_installed(self, app_id: str) -> bool:
         """Check an exact bundle id using ``application_listing``."""
         if not app_id:
             raise ValueError("app_id is required and must be a non-empty string")
-        result = self._runner.run(
-            self._command("application_listing"), check=False
-        )
+        result = self._ios4cli.run("application_listing", check=False)
         if result.returncode != 0:
             logger.warning(
                 f"{_LOG_TAG} application listing failed on {self.device_id}: "
@@ -335,7 +349,7 @@ class IOSDevice4(DeviceBase):
             command.extend(["--args", encoded_arguments])
         command.append(target)
 
-        result = self._runner.run(command)
+        result = self._ios4cli.runner.run(command)
         match = _PID_PATTERN.search(f"{result.stdout}\n{result.stderr}")
         if match is None:
             raise IOSDevice4Error(
@@ -426,7 +440,7 @@ class IOSDevice4(DeviceBase):
             f"{_LOG_TAG} Launching {target} through process_control on "
             f"{self.device_id}"
         )
-        self._runner.run(self._command("process_control", target))
+        self._ios4cli.run("process_control", target)
 
     def capture_memgraph(
         self,
@@ -473,10 +487,10 @@ class IOSDevice4(DeviceBase):
             f"to {output_path}"
         )
         try:
-            result = self._runner.run(
-                self._command(
-                    "memgraph", str(target_pid), str(temporary_path)
-                ),
+            result = self._ios4cli.run(
+                "memgraph",
+                str(target_pid),
+                str(temporary_path),
                 check=False,
                 timeout=600,
             )
@@ -515,9 +529,7 @@ class IOSDevice4(DeviceBase):
         logger.info(
             f"{_LOG_TAG} Falling back to ios4 pkill for {target} on {self.device_id}"
         )
-        result = self._runner.run(
-            self._command("pkill", "--bundle", target), check=False
-        )
+        result = self._ios4cli.run("pkill", "--bundle", target, check=False)
         if result.returncode != 0:
             raise IOSDevice4Error(
                 f"{_LOG_TAG} Failed to stop {target} on {self.device_id}: "
@@ -598,9 +610,7 @@ class IOSDevice4(DeviceBase):
 
     def host_is_running(self) -> bool:
         """Return whether a WebDriverAgent-style process is running."""
-        result = self._runner.run(
-            self._command("device_info", "processes"), check=False
-        )
+        result = self._ios4cli.run("device_info", "processes", check=False)
         if result.returncode != 0:
             return False
         output = result.stdout.lower()
@@ -610,9 +620,7 @@ class IOSDevice4(DeviceBase):
         """Capture a screenshot with the ios4 screenshot service."""
         local_path = Path(local)
         local_path.parent.mkdir(parents=True, exist_ok=True)
-        result = self._runner.run(
-            self._command("screenshot", str(local_path)), check=False
-        )
+        result = self._ios4cli.run("screenshot", str(local_path), check=False)
         return result.returncode == 0 and local_path.exists()
 
     def tap(self, x: float, y: float, *, app_id: str | None = None) -> None:
@@ -871,9 +879,7 @@ class IOSDevice4(DeviceBase):
 
     def _run_documents(self, app_id: str, *arguments: str) -> CommandResult:
         """Run an ``afc --documents`` subcommand without raising on failure."""
-        return self._runner.run(
-            self._documents_command(app_id, *arguments), check=False
-        )
+        return self._ios4cli.run_documents(app_id, *arguments)
 
     def _documents_stat(self, app_id: str, remote: str) -> str | None:
         """Return the ``st_ifmt`` of ``remote``, or ``None`` when it is missing."""
