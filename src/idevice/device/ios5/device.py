@@ -182,6 +182,7 @@ class IOSDevice5(DeviceBase):
       tool that reaches the DVT memory-graph service.
     * :meth:`screenshot` uses ``device capture screenshot`` where Xcode
       provides it (Xcode 27+), then falls back to ``ios4``.
+    * :meth:`tap` delegates normalized screen taps to the ``iwda2`` HTTP agent.
 
     CoreDevice has no file-removal service. :meth:`documents_rm` therefore
     delegates Documents cleanup to the ``ios4`` AFC service;
@@ -1104,6 +1105,61 @@ class IOSDevice5(DeviceBase):
     ) -> None:
         del x1, y1, x2, y2, duration_ms
         self._unsupported("swipe")
+
+    @staticmethod
+    def _validate_normalized_coordinate(value: float, name: str) -> None:
+        """Validate one normalized tap coordinate."""
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{name} must be a normalized coordinate in [0, 1]")
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise ValueError(f"{name} must be a normalized coordinate in [0, 1]")
+
+    def tap(self, x: float, y: float, *, app_id: str | None = None) -> None:
+        """Tap a normalized screen point through the iwda2 HTTP agent.
+
+        Args:
+            x: Horizontal position in ``[0, 1]``.
+            y: Vertical position in ``[0, 1]``.
+            app_id: Foreground bundle id used to anchor coordinates to the
+                app's current orientation. Defaults to :attr:`package_name`;
+                when both are empty, iwda2 uses its configured target or
+                SpringBoard.
+
+        Raises:
+            ValueError: If ``x`` or ``y`` is not a finite number in ``[0, 1]``.
+            IOSDevice5Error: If iwda2 is unavailable or rejects the tap.
+        """
+        self._validate_normalized_coordinate(x, "x")
+        self._validate_normalized_coordinate(y, "y")
+
+        device_ip = self.device_ip.strip()
+        if not device_ip:
+            raise IOSDevice5Error(
+                f"{_LOG_TAG} Cannot tap through iwda2: device_ip is empty"
+            )
+
+        target = (app_id or self.package_name).strip()
+        params: dict[str, float | str] = {"x": float(x), "y": float(y)}
+        if target:
+            params["bundleId"] = target
+        url = f"http://{device_ip}:{_IWDA2_PORT}/api/tap"
+        logger.info(
+            f"{_LOG_TAG} Tapping ({x}, {y}) through iwda2 on "
+            f"{self.device_id} for {target or 'default anchor'}"
+        )
+        try:
+            response = requests.get(
+                url, params=params, timeout=_IWDA2_HTTP_TIMEOUT
+            )
+        except requests.RequestException as exc:
+            raise IOSDevice5Error(
+                f"{_LOG_TAG} iwda2 tap request failed: GET {url}: {exc}"
+            ) from exc
+        if response.status_code != 200:
+            raise IOSDevice5Error(
+                f"{_LOG_TAG} iwda2 tap failed: GET {url} returned HTTP "
+                f"{response.status_code}: {response.text!r}"
+            )
 
     def documents_rm(self, app_id: str, remote: str) -> bool:
         """Recursively remove a path from an app's Documents sandbox via ios4."""

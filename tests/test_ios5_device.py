@@ -505,6 +505,107 @@ def test_moniter_returns_false_for_http_error(
         assert ios5_device.start_moniter() is False
 
 
+def test_tap_calls_iwda2_with_normalized_coordinates_and_bundle_id(
+    ios5_device: IOSDevice5,
+) -> None:
+    response = MagicMock(status_code=200)
+
+    with patch(
+        "idevice.device.ios5.device.requests.get", return_value=response
+    ) as get:
+        ios5_device.tap(0.25, 0.75, app_id="com.example.foreground")
+
+    get.assert_called_once_with(
+        f"http://{DEVICE_IP}:18201/api/tap",
+        params={
+            "x": 0.25,
+            "y": 0.75,
+            "bundleId": "com.example.foreground",
+        },
+        timeout=30.0,
+    )
+
+
+def test_tap_uses_the_bound_package_name_as_the_iwda2_anchor(
+    ios5_device: IOSDevice5,
+) -> None:
+    response = MagicMock(status_code=200)
+
+    with patch(
+        "idevice.device.ios5.device.requests.get", return_value=response
+    ) as get:
+        ios5_device.tap(0, 1)
+
+    assert get.call_args.kwargs["params"] == {
+        "x": 0.0,
+        "y": 1.0,
+        "bundleId": APP_ID,
+    }
+
+
+@pytest.mark.parametrize(
+    ("x", "y", "coordinate"),
+    [
+        (-0.1, 0.5, "x"),
+        (1.1, 0.5, "x"),
+        (0.5, -0.1, "y"),
+        (0.5, 1.1, "y"),
+        (True, 0.5, "x"),
+        (float("nan"), 0.5, "x"),
+        (0.5, float("inf"), "y"),
+    ],
+)
+def test_tap_rejects_invalid_normalized_coordinates(
+    ios5_device: IOSDevice5,
+    x: float,
+    y: float,
+    coordinate: str,
+) -> None:
+    with patch("idevice.device.ios5.device.requests.get") as get:
+        with pytest.raises(
+            ValueError, match=rf"{coordinate} must be a normalized coordinate"
+        ):
+            ios5_device.tap(x, y)
+
+    get.assert_not_called()
+
+
+def test_tap_raises_when_iwda2_is_unreachable(
+    ios5_device: IOSDevice5,
+) -> None:
+    with patch(
+        "idevice.device.ios5.device.requests.get",
+        side_effect=requests.ConnectionError("refused"),
+    ):
+        with pytest.raises(IOSDevice5Error, match="tap request failed"):
+            ios5_device.tap(0.5, 0.5)
+
+
+def test_tap_raises_when_iwda2_rejects_the_request(
+    ios5_device: IOSDevice5,
+) -> None:
+    response = MagicMock(
+        status_code=500,
+        text='{"status":"error","reason":"application is not running"}',
+    )
+
+    with patch(
+        "idevice.device.ios5.device.requests.get", return_value=response
+    ):
+        with pytest.raises(IOSDevice5Error, match="HTTP 500"):
+            ios5_device.tap(0.5, 0.5)
+
+
+def test_tap_raises_without_device_ip(ios5_device: IOSDevice5) -> None:
+    ios5_device._device_ip = ""
+
+    with patch("idevice.device.ios5.device.requests.get") as get:
+        with pytest.raises(IOSDevice5Error, match="device_ip is empty"):
+            ios5_device.tap(0.5, 0.5)
+
+    get.assert_not_called()
+
+
 XCODE_26_DEVICE_HELP = """SUBCOMMANDS:
   copy                    Copy files.
   info                    Commands that provide information about a device
@@ -825,8 +926,6 @@ def test_documents_rm_rejects_parent_path_segments(
 def test_operations_without_a_coredevice_service_are_unsupported(
     ios5_device: IOSDevice5,
 ) -> None:
-    with pytest.raises(NotImplementedError, match="tap"):
-        ios5_device.tap(0.5, 0.5)
     with pytest.raises(NotImplementedError, match="swipe"):
         ios5_device.swipe(0, 0, 10, 10)
     with pytest.raises(NotImplementedError, match="delete2"):

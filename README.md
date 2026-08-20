@@ -218,7 +218,7 @@ Every platform implementation shares the same interface:
 - `ls(remote, app_id=None, recursive=False)` — list a remote directory on the device
 - `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox; `IOSDevice5.documents_rm` delegates recursive removal to the `ios4` AFC service because CoreDevice has no delete command
 - `swipe(x1, y1, x2, y2, duration_ms=300)` — touch gesture (Android implemented; iOS/Windows raise `NotImplementedError`)
-- `tap(x, y, app_id=None)` — normalized touch input, implemented by `IOSDevice4` through WebDriverAgent
+- `tap(x, y, app_id=None)` — normalized touch input, implemented by `IOSDevice4` through WebDriverAgent and `IOSDevice5` through iwda2
 - `screenshot(local)` — capture the screen to a host file
 - `host_is_running()` — whether WebDriverAgent / UIAutomator2 host process is up
 - `capture_memgraph(output, pid=None)` — capture a process memory snapshot (`IOSDevice4`, and `IOSDevice5` by shelling out to `ios4`)
@@ -267,6 +267,7 @@ CoreDevice CLI, so it needs macOS with Xcode but no third-party binary:
 - Exact bundle-id checks via `device info apps --bundle-id`
 - Launch via `device process launch`, with the environment as a JSON dictionary and `argv` as real positional arguments
 - Stop by resolving the bundle's processes in `device info processes` and terminating each with `device process terminate --kill`
+- Normalized screen taps through `iwda2` at `http://<device-ip>:18201/api/tap`; the explicit `app_id` or bound `package_name` anchors coordinates to the app's current orientation
 - App data container transfers via `device copy to` / `device copy from` and listing via `device info files`, including the Documents sandbox; directory pushes can pass `remove_existing_content=True` to replace the destination contents
 - Screen capture via `device capture screenshot` on Xcode 27+, falling back to `ios4`
 - `capture_memgraph` shells out to `ios4`: CoreDevice exposes no memory-graph service
