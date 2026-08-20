@@ -271,7 +271,7 @@ CoreDevice CLI, so it needs macOS with Xcode but no third-party binary:
 - App data container transfers via `device copy to` / `device copy from` and listing via `device info files`, including the Documents sandbox; directory pushes can pass `remove_existing_content=True` to replace the destination contents
 - Screen capture via `device capture screenshot` on Xcode 27+, falling back to `ios4`
 - `capture_memgraph` shells out to `ios4`: CoreDevice exposes no memory-graph service
-- `documents_rm` checks the target through CoreDevice, then recursively removes it through `ios4 afc --documents <bundle-id> remove_all`; an already absent path is treated as successfully cleaned
+- `documents_rm` contains the same `ios4 afc --documents` workflow as `IOSDevice4.documents_rm`: inspect with `info`, then call `remove` for a file or `remove_all` for a directory
 - `delete2` and `swipe` raise `NotImplementedError` — CoreDevice has no general file-removal or touch-injection service
 
 Every command is parsed from devicectl's JSON output, the only interface Apple

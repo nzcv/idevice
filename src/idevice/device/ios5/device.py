@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import posixpath
 import re
 import shutil
 import sys
@@ -21,7 +22,7 @@ from idevice.device.base.errors import (
     CommandExecutionError,
     DeviceNotFoundError,
 )
-from idevice.device.base.runner import SubprocessRunner
+from idevice.device.base.runner import CommandResult, SubprocessRunner
 from idevice.device.cache import InstalledAppCache, InstalledAppInfo
 from idevice.device.config import device_id as env_device_id
 from idevice.device.config import device_ip as env_device_ip
@@ -35,6 +36,10 @@ _WDA_PROCESS_MARKERS = ("webdriveragent", "xctrunner")
 _APP_DATA_DOMAIN = "appDataContainer"
 _WIRED_TRANSPORT = "wired"
 _DOCUMENTS_ROOT = "Documents"
+_IOS4_DOCUMENTS_ROOT = "/Documents"
+_IOS4_DOCUMENTS_DIR_IFMT = "S_IFDIR"
+_IOS4_DOCUMENTS_FILE_IFMT = "S_IFREG"
+_IOS4_DOCUMENTS_IFMT_PATTERN = re.compile(r'st_ifmt:\s*"(\w+)"')
 _DEFAULT_TIMEOUT = 120
 _INSTALL_TIMEOUT = 3600
 _MEMGRAPH_TIMEOUT = 600
@@ -1162,48 +1167,11 @@ class IOSDevice5(DeviceBase):
             )
 
     def documents_rm(self, app_id: str, remote: str) -> bool:
-        """Idempotently remove a Documents path via devicectl and ios4.
-
-        CoreDevice is used to check that the target exists before invoking
-        ``ios4 remove_all`` because ios4 aborts on AFC ``ObjectNotFound``.
-        A target that is already absent is considered successfully cleaned.
-        """
+        """Remove a Documents path using IOSDevice4's copied AFC workflow."""
         if not app_id:
             raise ValueError("app_id is required and must be a non-empty string")
-        if not remote or not isinstance(remote, str):
+        if not remote:
             raise ValueError("remote is required and must be a non-empty string")
-
-        relative = remote.strip().replace("\\", "/").strip("/")
-        if not relative:
-            raise ValueError("remote is required and must be a non-empty string")
-        parts = [part for part in relative.split("/") if part and part != "."]
-        if any(part == ".." for part in parts):
-            raise ValueError(f"remote path must not contain '..': {remote}")
-        if parts and parts[0] == _DOCUMENTS_ROOT:
-            parts = parts[1:]
-        documents_path = str(PurePosixPath("/", _DOCUMENTS_ROOT, *parts))
-
-        current = PurePosixPath(_DOCUMENTS_ROOT)
-        for part in parts:
-            entries = self._list_container(
-                app_id,
-                str(current),
-                documents_only=False,
-                recursive=False,
-            )
-            if entries is None:
-                logger.warning(
-                    f"{_LOG_TAG} Cannot inspect {self.device_id}:{current} "
-                    "before documents_rm"
-                )
-                return False
-            if not any(PurePosixPath(entry).name == part for entry in entries):
-                logger.info(
-                    f"{_LOG_TAG} {self.device_id}:{documents_path} is already "
-                    "absent"
-                )
-                return True
-            current /= part
 
         configured_binary = ios4_binary()
         binary = self._resolve_binary(configured_binary)
@@ -1214,11 +1182,14 @@ class IOSDevice5(DeviceBase):
             )
             return False
 
-        logger.info(
-            f"{_LOG_TAG} Removing {self.device_id}:{documents_path} via ios4"
-        )
-        try:
-            result = self._runner.run(
+        relative = remote.strip().replace("\\", "/").lstrip("/")
+        parts = [part for part in relative.split("/") if part and part != "."]
+        if any(part == ".." for part in parts):
+            raise ValueError(f"remote path must not contain '..': {remote}")
+        path = posixpath.join(_IOS4_DOCUMENTS_ROOT, *parts)
+
+        def run_documents(*arguments: str) -> CommandResult:
+            return self._runner.run(
                 [
                     binary,
                     "--udid",
@@ -1226,25 +1197,37 @@ class IOSDevice5(DeviceBase):
                     "afc",
                     "--documents",
                     app_id,
-                    "remove_all",
-                    documents_path,
+                    *arguments,
                 ],
                 check=False,
-                timeout=_INSTALL_TIMEOUT,
             )
+
+        try:
+            info = run_documents("info", path)
+        except CommandExecutionError as exc:
+            logger.warning(f"{_LOG_TAG} documents_rm info failed: {exc}")
+            return False
+        if info.returncode != 0:
+            logger.warning(
+                f"{_LOG_TAG} Remote path not found: {self.device_id}:{path}"
+            )
+            return False
+
+        match = _IOS4_DOCUMENTS_IFMT_PATTERN.search(info.stdout)
+        ifmt = match.group(1) if match is not None else _IOS4_DOCUMENTS_FILE_IFMT
+        subcommand = (
+            "remove_all" if ifmt == _IOS4_DOCUMENTS_DIR_IFMT else "remove"
+        )
+        logger.info(f"{_LOG_TAG} Removing {self.device_id}:{path} via ios4")
+        try:
+            result = run_documents(subcommand, path)
         except CommandExecutionError as exc:
             logger.warning(f"{_LOG_TAG} documents_rm failed: {exc}")
             return False
         if result.returncode != 0:
-            if "Afc(ObjectNotFound)" in result.stderr:
-                logger.info(
-                    f"{_LOG_TAG} {self.device_id}:{documents_path} disappeared "
-                    "before ios4 removal"
-                )
-                return True
-            logger.warning(
-                f"{_LOG_TAG} documents_rm failed on {self.device_id}: "
-                f"returncode={result.returncode}, stderr={result.stderr!r}"
+            logger.error(
+                f"{_LOG_TAG} Failed to remove {self.device_id}:{path}: "
+                f"{result.stderr.strip()}"
             )
             return False
         return True
