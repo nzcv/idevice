@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import shutil
 import sys
@@ -11,6 +12,8 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn
+
+import requests
 
 from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.base.errors import (
@@ -35,6 +38,9 @@ _DOCUMENTS_ROOT = "Documents"
 _DEFAULT_TIMEOUT = 120
 _INSTALL_TIMEOUT = 3600
 _MEMGRAPH_TIMEOUT = 600
+_IWDA2_PORT = 18201
+_IWDA2_HTTP_TIMEOUT = 30.0
+_IWDA2_DEFAULT_MONITOR_DURATION = 180
 
 
 class IOSDevice5Error(RuntimeError):
@@ -412,6 +418,62 @@ class IOSDevice5(DeviceBase):
         if not app_id:
             raise ValueError("app_id is required and must be a non-empty string")
         return self._app_record(app_id) is not None
+
+    def launch(
+        self,
+        app_id: str | None = None,
+        *,
+        args: list[str] | None = None,
+        environment: dict[str, str] | None = None,
+        terminate_existing: bool = True,
+        activate: bool = True,
+    ) -> None:
+        """Launch an installed app with optional environment and ``argv``.
+
+        Args:
+            app_id: Bundle identifier to launch. When omitted or empty, uses
+                the bound :attr:`package_name`.
+            args: Ordered command-line arguments passed to the app process.
+            environment: Environment variables injected before process start.
+            terminate_existing: Kill a running instance before launching.
+            activate: Bring the app to the foreground.
+
+        Raises:
+            ValueError: If both ``app_id`` and :attr:`package_name` are empty.
+            AppNotInstalledError: If the resolved bundle id is not installed.
+            IOSDevice5Error: If the device is unreachable, the launch fails, or
+                no PID comes back.
+        """
+        target = self._resolve_app_id(app_id)
+        options: list[str] = ["--activate" if activate else "--no-activate"]
+        if terminate_existing:
+            options.append("--terminate-existing")
+        if environment:
+            options.extend(
+                ["--environment-variables", self._encode_environment(environment)]
+            )
+        launch_arguments = self._validate_launch_arguments(args or [])
+
+        outcome = self._run(
+            self._command(
+                ["device", "process", "launch"],
+                *options,
+                "--",
+                target,
+                *launch_arguments,
+            )
+        )
+        result = self._require(outcome, f"launch of {target}")
+        process = result.get("process")
+        pid = process.get("processIdentifier") if isinstance(process, dict) else None
+        if not isinstance(pid, int):
+            raise IOSDevice5Error(
+                f"{_LOG_TAG} Launch of {target} returned no PID: {result!r}"
+            )
+        logger.info(f"{_LOG_TAG} Launched {target} on {self.device_id} with PID {pid}")
+        if not app_id:
+            self._last_launch_pid = pid
+            self._last_launch_app_id = target
 
     def launch_app(
         self,
@@ -1015,3 +1077,62 @@ class IOSDevice5(DeviceBase):
     def delete2(self, data_path: AppDataPath, remote: str) -> bool:
         del data_path, remote
         self._unsupported("delete2")
+
+    def start_moniter(
+        self, duration: int = _IWDA2_DEFAULT_MONITOR_DURATION
+    ) -> bool:
+        """Start iwda2's dialog monitor for ``duration`` seconds.
+
+        Args:
+            duration: Positive, finite monitoring window in seconds. A repeated
+                call resets iwda2's deadline from the time of that call.
+
+        Returns:
+            bool: Whether iwda2 accepted the request.
+
+        Raises:
+            ValueError: If ``duration`` is not a positive finite number.
+        """
+        if (
+            isinstance(duration, bool)
+            or not isinstance(duration, (int, float))
+            or not math.isfinite(duration)
+            or duration <= 0
+        ):
+            raise ValueError("duration must be a positive finite number")
+        return self._request_iwda2_monitor(
+            "/api/monitor/start",
+            params={"duration": format(float(duration), "g")},
+        )
+
+    def stop_moniter(self) -> bool:
+        """Stop iwda2's dialog monitor before its deadline elapses."""
+        return self._request_iwda2_monitor("/api/monitor/stop")
+
+    def _request_iwda2_monitor(
+        self, route: str, *, params: dict[str, str] | None = None
+    ) -> bool:
+        """Send one monitor command to the iwda2 HTTP server."""
+        device_ip = self.device_ip.strip()
+        if not device_ip:
+            logger.warning(
+                f"{_LOG_TAG} Cannot call iwda2 {route}: device_ip is empty"
+            )
+            return False
+
+        url = f"http://{device_ip}:{_IWDA2_PORT}{route}"
+        try:
+            response = requests.get(
+                url, params=params, timeout=_IWDA2_HTTP_TIMEOUT
+            )
+        except requests.RequestException as exc:
+            logger.warning(f"{_LOG_TAG} iwda2 request failed: GET {url}: {exc}")
+            return False
+
+        if response.status_code != 200:
+            logger.warning(
+                f"{_LOG_TAG} GET {url} returned HTTP {response.status_code}: "
+                f"{response.text!r}"
+            )
+            return False
+        return True

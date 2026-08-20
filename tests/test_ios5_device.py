@@ -8,6 +8,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from idevice.device.base.device import AppDataPath
 from idevice.device.base.errors import AppNotInstalledError, DeviceNotFoundError
@@ -430,6 +431,78 @@ def test_host_is_running_detects_the_runner_executable(
     )
 
     assert ios5_device.host_is_running() is True
+
+
+def test_start_moniter_calls_iwda2_with_duration(
+    ios5_device: IOSDevice5,
+) -> None:
+    response = MagicMock(status_code=200)
+
+    with patch(
+        "idevice.device.ios5.device.requests.get", return_value=response
+    ) as get:
+        assert ios5_device.start_moniter(duration=90) is True
+
+    get.assert_called_once_with(
+        f"http://{DEVICE_IP}:18201/api/monitor/start",
+        params={"duration": "90"},
+        timeout=30.0,
+    )
+
+
+def test_stop_moniter_calls_iwda2(ios5_device: IOSDevice5) -> None:
+    response = MagicMock(status_code=200)
+
+    with patch(
+        "idevice.device.ios5.device.requests.get", return_value=response
+    ) as get:
+        assert ios5_device.stop_moniter() is True
+
+    get.assert_called_once_with(
+        f"http://{DEVICE_IP}:18201/api/monitor/stop",
+        params=None,
+        timeout=30.0,
+    )
+
+
+@pytest.mark.parametrize("duration", [0, -1, float("inf"), float("nan"), True])
+def test_start_moniter_rejects_invalid_duration(
+    ios5_device: IOSDevice5, duration: float
+) -> None:
+    with pytest.raises(ValueError, match="positive finite number"):
+        ios5_device.start_moniter(duration)
+
+
+def test_moniter_returns_false_when_iwda2_is_unreachable(
+    ios5_device: IOSDevice5,
+) -> None:
+    with patch(
+        "idevice.device.ios5.device.requests.get",
+        side_effect=requests.ConnectionError("refused"),
+    ):
+        assert ios5_device.start_moniter() is False
+
+
+def test_moniter_returns_false_without_device_ip(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios5_device._device_ip = ""
+
+    with patch("idevice.device.ios5.device.requests.get") as get:
+        assert ios5_device.stop_moniter() is False
+
+    get.assert_not_called()
+
+
+def test_moniter_returns_false_for_http_error(
+    ios5_device: IOSDevice5,
+) -> None:
+    response = MagicMock(status_code=409, text="disabled")
+
+    with patch(
+        "idevice.device.ios5.device.requests.get", return_value=response
+    ):
+        assert ios5_device.start_moniter() is False
 
 
 XCODE_26_DEVICE_HELP = """SUBCOMMANDS:

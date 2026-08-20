@@ -34,3 +34,8 @@ tests_real/
 
 # tmp/
 tmp/
+iwda2
+
+# Local agent state
+.agents/
+.claude/worktrees/

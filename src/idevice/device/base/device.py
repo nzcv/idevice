@@ -576,3 +576,13 @@ class DeviceBase(ABC):
         raise NotImplementedError(
             f"launch_wda is not supported on {self.platform} devices"
         )
+
+    def start_moniter(self):
+        raise NotImplementedError(
+            f"start_moniter is not supported on {self.platform} devices"
+        )
+
+    def stop_moniter(self):
+        raise NotImplementedError(
+            f"stop_moniter is not supported on {self.platform} devices"
+        )
