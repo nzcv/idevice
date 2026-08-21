@@ -878,14 +878,9 @@ class XcrunCLI:
         return True
 
 
-# Compatibility name retained for callers that imported the former backend
-# class directly. It is now an alias of the standalone CLI wrapper and does not
-# participate in the DeviceBase hierarchy.
-Devicectl = XcrunCLI
 IOSDevice5Error = XcrunCLIError
 
 __all__ = [
-    "Devicectl",
     "DevicectlOutcome",
     "IOSDevice5Error",
     "XcrunCLI",

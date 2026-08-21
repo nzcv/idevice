@@ -36,15 +36,17 @@ APP_URL = "file:///private/var/containers/Bundle/Application/AAAA/ExampleGame.ap
 def ios5_device(tmp_path: Path) -> IOSDevice5:
     """Build an IOSDevice5 with a mocked runner and isolated cache."""
     with patch("idevice.device.ios5.device.sys.platform", "darwin"):
-        with patch(
-            "idevice.device.ios5.device.shutil.which", return_value="/usr/bin/xcrun"
-        ):
-            device = IOSDevice5(
-                UDID,
-                device_ip=DEVICE_IP,
-                package_name=APP_ID,
-                cache_dir=tmp_path / "cache",
-            )
+        with patch("idevice.device.ios5.device.shutil.which", return_value="/usr/bin/xcrun"):
+            with patch(
+                "idevice.device.ios5.device.ios4_binary",
+                return_value=IOS4_BINARY,
+            ):
+                device = IOSDevice5(
+                    UDID,
+                    device_ip=DEVICE_IP,
+                    package_name=APP_ID,
+                    cache_dir=tmp_path / "cache",
+                )
     device._runner = MagicMock()
     return device
 
@@ -85,14 +87,8 @@ def test_construction_requires_xcrun(tmp_path: Path) -> None:
 
 
 def test_ios5_uses_the_common_ios4cli_type(ios5_device: IOSDevice5) -> None:
-    with patch(
-        "idevice.device.ios5.device.shutil.which", return_value=IOS4_BINARY
-    ):
-        backend = ios5_device._get_ios4cli()
-
-    assert isinstance(backend, IOS4CLI)
-    assert ios5_device._ios4cli is backend
-    assert backend.runner is ios5_device._runner
+    assert isinstance(ios5_device._ios4cli, IOS4CLI)
+    assert ios5_device._ios4cli.runner is ios5_device._runner
 
 
 def test_ios5_composes_xcruncli_instead_of_inheriting_it(
@@ -324,7 +320,7 @@ def test_install_falls_back_to_ios4_after_devicectl_failure(
     )
     ios4cli = MagicMock()
     ios4cli.install.return_value = True
-    ios5_device._get_ios4cli = MagicMock(return_value=ios4cli)
+    ios5_device._ios4cli = ios4cli
 
     assert ios5_device.install(ipa, app_id=APP_ID) is True
 
@@ -337,7 +333,7 @@ def test_is_installed_falls_back_only_when_devicectl_fails(
 ) -> None:
     ios4cli = MagicMock()
     ios4cli.is_installed.return_value = True
-    ios5_device._get_ios4cli = MagicMock(return_value=ios4cli)
+    ios5_device._ios4cli = ios4cli
     ios5_device._run = MagicMock(return_value=outcome({"apps": []}))
 
     assert ios5_device.is_installed(APP_ID) is False
@@ -417,7 +413,7 @@ def test_launch_rejects_an_app_that_is_not_installed(
 def test_launch_reports_an_unreachable_device_as_such(
     ios5_device: IOSDevice5,
 ) -> None:
-    ios5_device._get_ios4cli = MagicMock(return_value=None)
+    ios5_device._ios4cli = None
     ios5_device._run = MagicMock(
         return_value=outcome(returncode=1, error="The tunnel was interrupted.")
     )
@@ -427,7 +423,7 @@ def test_launch_reports_an_unreachable_device_as_such(
 
 
 def test_launch_requires_a_pid_in_the_result(ios5_device: IOSDevice5) -> None:
-    ios5_device._get_ios4cli = MagicMock(return_value=None)
+    ios5_device._ios4cli = None
     ios5_device._run = MagicMock(
         side_effect=[app_listing(APP_ID, APP_URL), outcome({"process": {}})]
     )
@@ -804,10 +800,10 @@ def test_capture_memgraph_reports_a_missing_ios4_cli(
     ios5_device: IOSDevice5, tmp_path: Path
 ) -> None:
     ios5_device._last_launch_pid = 4815
+    ios5_device._ios4cli = None
 
-    with patch("idevice.device.ios5.device.shutil.which", return_value=None):
-        with pytest.raises(IOSDevice5Error, match="capture_memgraph needs"):
-            ios5_device.capture_memgraph(tmp_path / "game.memgraph")
+    with pytest.raises(IOSDevice5Error, match="capture_memgraph needs"):
+        ios5_device.capture_memgraph(tmp_path / "game.memgraph")
 
 
 def test_push_scopes_the_transfer_to_the_documents_sandbox(
@@ -920,7 +916,7 @@ def test_documents_ls_lists_the_documents_root(ios5_device: IOSDevice5) -> None:
 
 
 def test_ls_reports_a_failed_listing(ios5_device: IOSDevice5) -> None:
-    ios5_device._get_ios4cli = MagicMock(return_value=None)
+    ios5_device._ios4cli = None
     ios5_device._run = MagicMock(
         return_value=outcome(returncode=1, error="No such file or directory")
     )
@@ -961,7 +957,7 @@ def test_documents_rm_routes_directly_to_ios4(
 ) -> None:
     ios4cli = MagicMock()
     ios4cli.documents_rm.return_value = True
-    ios5_device._get_ios4cli = MagicMock(return_value=ios4cli)
+    ios5_device._ios4cli = ios4cli
     ios5_device._run = MagicMock()
 
     assert ios5_device.documents_rm(APP_ID, "saves") is True
@@ -1021,8 +1017,9 @@ def test_documents_rm_reports_a_failed_ios4_remove(
 def test_documents_rm_reports_a_missing_ios4_cli(
     ios5_device: IOSDevice5,
 ) -> None:
-    with patch("idevice.device.ios5.device.shutil.which", return_value=None):
-        assert ios5_device.documents_rm(APP_ID, "saves") is False
+    ios5_device._ios4cli = None
+
+    assert ios5_device.documents_rm(APP_ID, "saves") is False
 
     ios5_device._runner.run.assert_not_called()
 
