@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
-import shutil
 import sys
-from collections.abc import Callable
 from pathlib import Path
 
 import requests
@@ -57,7 +55,7 @@ class IOSDevice5(DeviceBase):
                 f"installed; this host is {sys.platform}"
             )
         configured_xcrun = xcrun_binary()
-        if self._resolve_binary(configured_xcrun) is None:
+        if XcrunCLI.resolve_binary(configured_xcrun) is None:
             logger.error(f"{_LOG_TAG} `{configured_xcrun}` CLI not found")
             raise IOSDevice5Error(
                 f"`{configured_xcrun}` CLI not found. Install Xcode, or set "
@@ -77,7 +75,7 @@ class IOSDevice5(DeviceBase):
             package_name=package_name,
         )
         self._app_cache = InstalledAppCache(device_id, cache_dir=cache_dir)
-        self._ios4cli: IOS4CLI | None = IOS4CLI(
+        self._ios4cli = IOS4CLI(
             device_id,
             binary=ios4_binary(),
             runner=runner,
@@ -88,42 +86,6 @@ class IOSDevice5(DeviceBase):
         """Return the PID from the most recent successful launch."""
         return self._xcruncli.last_launch_pid
 
-    @property
-    def _runner(self) -> SubprocessRunner:
-        """Compatibility alias for the composed CLI runner."""
-        return self._xcruncli.runner
-
-    @_runner.setter
-    def _runner(self, value: SubprocessRunner) -> None:
-        self._xcruncli.runner = value
-        if self._ios4cli is not None:
-            self._ios4cli.runner = value
-
-    @property
-    def _last_launch_pid(self) -> int | None:
-        return self._xcruncli.last_launch_pid
-
-    @_last_launch_pid.setter
-    def _last_launch_pid(self, value: int | None) -> None:
-        self._xcruncli.last_launch_pid = value
-
-    @property
-    def _last_launch_app_id(self) -> str:
-        return self._xcruncli.last_launch_app_id
-
-    @_last_launch_app_id.setter
-    def _last_launch_app_id(self, value: str) -> None:
-        self._xcruncli.last_launch_app_id = value
-
-    @property
-    def _run(self) -> Callable[..., DevicectlOutcome]:
-        """Compatibility alias for the composed devicectl invocation."""
-        return self._xcruncli.run
-
-    @_run.setter
-    def _run(self, value: Callable[..., DevicectlOutcome]) -> None:
-        self._xcruncli.run = value
-
     @classmethod
     def from_env(cls) -> IOSDevice5:
         """Build an IOSDevice5 from the ``GAUTO_*`` environment."""
@@ -132,14 +94,6 @@ class IOSDevice5(DeviceBase):
             device_ip=env_device_ip(),
             package_name=env_package_name(),
         )
-
-    @staticmethod
-    def _resolve_binary(binary: str) -> str | None:
-        """Return the usable path for ``binary``, or ``None`` when missing."""
-        resolved = shutil.which(binary)
-        if resolved is not None:
-            return resolved
-        return binary if Path(binary).is_file() else None
 
     @classmethod
     def default_udid(cls) -> str:
@@ -157,45 +111,42 @@ class IOSDevice5(DeviceBase):
                     f"({xcrun_error}) or ios4 ({ios4_error})"
                 ) from ios4_error
 
-    def _log_fallback(self, operation: str, error: BaseException | None = None) -> None:
-        reason = f": {error}" if error is not None else ""
+    def _log_fallback(self, operation: str, error: BaseException) -> None:
         logger.warning(
-            f"{_LOG_TAG} devicectl {operation} failed{reason}; falling back to ios4"
+            f"{_LOG_TAG} devicectl {operation} failed: {error}; "
+            "falling back to ios4"
         )
 
     def install(self, package_path: Path, app_id: str | None = None) -> bool:
         package_path = Path(package_path)
+        resolved_app_id = app_id or ""
+        installation_path: str | None = None
         try:
             record = self._xcruncli.install(package_path)
+            installed = True
+            resolved_app_id = resolved_app_id or str(record.get("bundleID") or "")
+            reported_path = record.get("installationURL")
+            installation_path = (
+                reported_path if isinstance(reported_path, str) else None
+            )
         except _DEVICETCL_FAILURES as exc:
             self._log_fallback("install", exc)
-            backend = self._ios4cli
-            if backend is None:
-                return False
-            installed = backend.install(package_path)
-            if installed and app_id:
-                self._app_cache.add(
-                    app_id, version=package_path.stem, path=None
-                )
-            return installed
-        resolved_app_id = app_id or str(record.get("bundleID") or "")
-        if resolved_app_id:
+            installed = self._ios4cli.install(package_path)
+
+        if installed and resolved_app_id:
             self._app_cache.add(
                 resolved_app_id,
                 version=package_path.stem,
-                path=record.get("installationURL"),
+                path=installation_path,
             )
-        return True
+        return installed
 
     def uninstall(self, app_id: str) -> None:
         try:
             self._xcruncli.uninstall(app_id)
         except _DEVICETCL_FAILURES as exc:
             self._log_fallback("uninstall", exc)
-            backend = self._ios4cli
-            if backend is None:
-                raise
-            backend.uninstall(app_id)
+            self._ios4cli.uninstall(app_id)
         self._app_cache.remove(app_id)
 
     def is_installed(self, app_id: str) -> bool:
@@ -203,8 +154,7 @@ class IOSDevice5(DeviceBase):
             return self._xcruncli.is_installed(app_id)
         except _DEVICETCL_FAILURES as exc:
             self._log_fallback("is_installed", exc)
-            backend = self._ios4cli
-            return backend.is_installed(app_id) if backend else False
+            return self._ios4cli.is_installed(app_id)
 
     def launch(
         self,
@@ -215,23 +165,14 @@ class IOSDevice5(DeviceBase):
         terminate_existing: bool = True,
         activate: bool = True,
     ) -> None:
-        try:
-            self._xcruncli.launch(
-                app_id,
-                args=args,
-                environment=environment,
-                terminate_existing=terminate_existing,
-                activate=activate,
-            )
-        except _DEVICETCL_FAILURES as exc:
-            self._log_fallback("launch", exc)
-            backend = self._ios4cli
-            if backend is None:
-                raise
-            backend.launch_app(
-                self._resolve_app_id(app_id), args=args, environment=environment
-            )
-            self._sync_ios4_launch(backend)
+        self._launch_with_fallback(
+            app_id,
+            args=args,
+            environment=environment,
+            terminate_existing=terminate_existing,
+            activate=activate,
+            check_installed=False,
+        )
 
     def launch_app(
         self,
@@ -242,8 +183,33 @@ class IOSDevice5(DeviceBase):
         terminate_existing: bool = True,
         activate: bool = True,
     ) -> None:
+        self._launch_with_fallback(
+            app_id,
+            args=args,
+            environment=environment,
+            terminate_existing=terminate_existing,
+            activate=activate,
+            check_installed=True,
+        )
+
+    def _launch_with_fallback(
+        self,
+        app_id: str | None,
+        *,
+        args: list[str] | None,
+        environment: dict[str, str] | None,
+        terminate_existing: bool,
+        activate: bool,
+        check_installed: bool,
+    ) -> None:
+        operation = "launch_app" if check_installed else "launch"
+        launch = (
+            self._xcruncli.launch_app
+            if check_installed
+            else self._xcruncli.launch
+        )
         try:
-            self._xcruncli.launch_app(
+            launch(
                 app_id,
                 args=args,
                 environment=environment,
@@ -251,75 +217,52 @@ class IOSDevice5(DeviceBase):
                 activate=activate,
             )
         except _DEVICETCL_FAILURES as exc:
-            self._log_fallback("launch_app", exc)
-            backend = self._ios4cli
-            if backend is None:
-                raise
-            backend.launch_app(
+            self._log_fallback(operation, exc)
+            self._ios4cli.launch_app(
                 self._resolve_app_id(app_id), args=args, environment=environment
             )
-            self._sync_ios4_launch(backend)
+            self._sync_ios4_launch()
 
-    def _sync_ios4_launch(self, backend: IOS4CLI) -> None:
-        self._last_launch_pid = backend.last_launch_pid
-        self._last_launch_app_id = backend.last_launch_app_id
+    def _sync_ios4_launch(self) -> None:
+        self._xcruncli.last_launch_pid = self._ios4cli.last_launch_pid
+        self._xcruncli.last_launch_app_id = self._ios4cli.last_launch_app_id
 
     def stop_app(self, app_id: str | None = None) -> None:
         try:
             self._xcruncli.stop_app(app_id)
         except _DEVICETCL_FAILURES as exc:
             self._log_fallback("stop_app", exc)
-            backend = self._ios4cli
-            if backend is None:
-                raise
-            backend.stop_app(self._resolve_app_id(app_id))
-            self._sync_ios4_launch(backend)
+            self._ios4cli.stop_app(self._resolve_app_id(app_id))
+            self._sync_ios4_launch()
 
     def get_installed_pkg_name(self, app_id: str) -> InstalledAppInfo | None:
         try:
-            if not self._xcruncli.is_installed(app_id):
-                return None
-            return self._app_cache.get(app_id)
+            installed = self._xcruncli.is_installed(app_id)
         except _DEVICETCL_FAILURES as exc:
             self._log_fallback("get_installed_pkg_name", exc)
-            backend = self._ios4cli
-            if backend is None or not backend.is_installed(app_id):
-                return None
-            return self._app_cache.get(app_id)
+            installed = self._ios4cli.is_installed(app_id)
+        return self._app_cache.get(app_id) if installed else None
 
     def host_is_running(self) -> bool:
         try:
             return self._xcruncli.host_is_running()
         except _DEVICETCL_FAILURES as exc:
             self._log_fallback("host_is_running", exc)
-            backend = self._ios4cli
-            return backend.host_is_running() if backend else False
+            return self._ios4cli.host_is_running()
 
     def screenshot(self, local: Path | str) -> bool:
         local_path = Path(local)
         if self._xcruncli.screenshot(local_path):
             return True
-        return self._screenshot_via_ios4(local_path)
-
-    def _screenshot_via_ios4(self, local_path: Path) -> bool:
-        """Compatibility helper routed to the ios4 layer."""
-        backend = self._ios4cli
-        return backend.screenshot(local_path) if backend else False
+        return self._ios4cli.screenshot(local_path)
 
     def capture_memgraph(
         self, output: Path | str, *, pid: int | None = None
     ) -> Path:
         """Route the CoreDevice-unsupported memory graph directly to ios4."""
-        backend = self._ios4cli
-        if backend is None:
-            raise IOSDevice5Error(
-                f"{_LOG_TAG} capture_memgraph needs the `{ios4_binary()}` CLI, "
-                "which CoreDevice does not replace. Install it or set "
-                "IDEVICE_IOS4_BINARY."
-            )
-        target_pid = self._last_launch_pid if pid is None else pid
+        target_pid = self.last_launch_pid if pid is None else pid
         try:
-            return backend.capture_memgraph(output, pid=target_pid)
+            return self._ios4cli.capture_memgraph(output, pid=target_pid)
         except IOS4CLIError as exc:
             raise IOSDevice5Error(str(exc)) from exc
 
@@ -343,14 +286,13 @@ class IOSDevice5(DeviceBase):
             return
         except _DEVICETCL_FAILURES as exc:
             self._log_fallback("push", exc)
-            backend = self._ios4cli
-            if backend is None:
-                raise
             if not documents_only:
-                backend.push(local, remote, app_id=app_id, documents_only=False)
+                self._ios4cli.push(
+                    local, remote, app_id=app_id, documents_only=False
+                )
                 return
             target = self._resolve_app_id(app_id)
-            if not backend.documents_push(target, local, remote):
+            if not self._ios4cli.documents_push(target, local, remote):
                 raise IOS4CLIError(f"ios4 push failed for {target}:{remote}")
 
     def pull(
@@ -371,14 +313,13 @@ class IOSDevice5(DeviceBase):
             return
         except _DEVICETCL_FAILURES as exc:
             self._log_fallback("pull", exc)
-            backend = self._ios4cli
-            if backend is None:
-                raise
             if not documents_only:
-                backend.pull(remote, local, app_id=app_id, documents_only=False)
+                self._ios4cli.pull(
+                    remote, local, app_id=app_id, documents_only=False
+                )
                 return
             target = self._resolve_app_id(app_id)
-            if not backend.documents_pull(target, remote, local):
+            if not self._ios4cli.documents_pull(target, remote, local):
                 raise IOS4CLIError(f"ios4 pull failed for {target}:{remote}")
 
     def ls(
@@ -398,30 +339,27 @@ class IOSDevice5(DeviceBase):
             )
         except _DEVICETCL_FAILURES as exc:
             self._log_fallback("ls", exc)
-            backend = self._ios4cli
-            if backend is None:
-                raise
             if not documents_only or recursive:
-                return backend.ls(remote, app_id=app_id, recursive=recursive)
-            return backend.documents_ls(self._resolve_app_id(app_id), remote)
+                return self._ios4cli.ls(
+                    remote, app_id=app_id, recursive=recursive
+                )
+            return self._ios4cli.documents_ls(
+                self._resolve_app_id(app_id), remote
+            )
 
     def documents_exists(self, app_id: str, remote: str) -> bool:
         try:
             return self._xcruncli.documents_exists(app_id, remote)
         except _DEVICETCL_FAILURES as exc:
             self._log_fallback("documents_exists", exc)
-            backend = self._ios4cli
-            return backend.documents_exists(app_id, remote) if backend else False
+            return self._ios4cli.documents_exists(app_id, remote)
 
     def documents_ls(self, app_id: str, remote: str) -> list[str]:
         try:
             return self._xcruncli.documents_ls(app_id, remote)
         except _DEVICETCL_FAILURES as exc:
             self._log_fallback("documents_ls", exc)
-            backend = self._ios4cli
-            if backend is None:
-                raise
-            return backend.documents_ls(app_id, remote)
+            return self._ios4cli.documents_ls(app_id, remote)
 
     def documents_pull(self, app_id: str, remote: str, local: Path | str) -> bool:
         try:
@@ -431,8 +369,7 @@ class IOSDevice5(DeviceBase):
             return True
         except (FileNotFoundError, *_DEVICETCL_FAILURES) as exc:
             self._log_fallback("documents_pull", exc)
-            backend = self._ios4cli
-            return backend.documents_pull(app_id, remote, local) if backend else False
+            return self._ios4cli.documents_pull(app_id, remote, local)
 
     def documents_push(
         self,
@@ -453,13 +390,11 @@ class IOSDevice5(DeviceBase):
             return True
         except (FileNotFoundError, *_DEVICETCL_FAILURES) as exc:
             self._log_fallback("documents_push", exc)
-            backend = self._ios4cli
-            return backend.documents_push(app_id, local, remote) if backend else False
+            return self._ios4cli.documents_push(app_id, local, remote)
 
     def documents_rm(self, app_id: str, remote: str) -> bool:
         """Route CoreDevice-unsupported removal directly to ios4."""
-        backend = self._ios4cli
-        return backend.documents_rm(app_id, remote) if backend else False
+        return self._ios4cli.documents_rm(app_id, remote)
 
     def pull2(self, data_path: AppDataPath, remote: str, local: Path | str) -> bool:
         if not isinstance(data_path, AppDataPath):
@@ -473,10 +408,7 @@ class IOSDevice5(DeviceBase):
             return True
         except _DEVICETCL_FAILURES as exc:
             self._log_fallback("pull2", exc)
-            backend = self._ios4cli
-            if backend is None:
-                return False
-            return backend.pull2(data_path, remote, local)
+            return self._ios4cli.pull2(data_path, remote, local)
 
     def swipe(
         self,
@@ -487,16 +419,10 @@ class IOSDevice5(DeviceBase):
         *,
         duration_ms: int = 300,
     ) -> None:
-        backend = self._ios4cli
-        if backend is None:
-            self._unsupported("swipe")
-        backend.swipe(x1, y1, x2, y2, duration_ms=duration_ms)
+        self._ios4cli.swipe(x1, y1, x2, y2, duration_ms=duration_ms)
 
     def delete2(self, data_path: AppDataPath, remote: str) -> bool:
-        backend = self._ios4cli
-        if backend is None:
-            self._unsupported("delete2")
-        return backend.delete2(data_path, remote)
+        return self._ios4cli.delete2(data_path, remote)
 
     @staticmethod
     def _validate_normalized_coordinate(value: float, name: str) -> None:

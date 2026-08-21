@@ -373,6 +373,46 @@ class XcrunCLI:
             raise ValueError("app_id is required and must be a non-empty string")
         return self._app_record(app_id) is not None
 
+    def _launch_process(
+        self,
+        app_id: str | None,
+        *,
+        args: list[str] | None,
+        environment: dict[str, str] | None,
+        terminate_existing: bool,
+        activate: bool,
+    ) -> tuple[str, int]:
+        """Launch an app and return its resolved bundle id and process id."""
+        target = self._resolve_app_id(app_id)
+        options: list[str] = ["--activate" if activate else "--no-activate"]
+        if terminate_existing:
+            options.append("--terminate-existing")
+        if environment:
+            options.extend(
+                ["--environment-variables", self.encode_environment(environment)]
+            )
+        launch_arguments = self.validate_launch_arguments(args or [])
+
+        logger.info(f"{_LOG_TAG} Launching {target} on {self.device_id}")
+        outcome = self.run(
+            self.command(
+                ["device", "process", "launch"],
+                *options,
+                "--",
+                target,
+                *launch_arguments,
+            )
+        )
+        result = self.require(outcome, f"launch of {target}")
+        process = result.get("process")
+        pid = process.get("processIdentifier") if isinstance(process, dict) else None
+        if not isinstance(pid, int):
+            raise XcrunCLIError(
+                f"{_LOG_TAG} Launch of {target} returned no PID: {result!r}"
+            )
+        logger.info(f"{_LOG_TAG} Launched {target} on {self.device_id} with PID {pid}")
+        return target, pid
+
     def launch(
         self,
         app_id: str | None = None,
@@ -398,33 +438,13 @@ class XcrunCLI:
             XcrunCLIError: If the device is unreachable, the launch fails, or
                 no PID comes back.
         """
-        target = self._resolve_app_id(app_id)
-        options: list[str] = ["--activate" if activate else "--no-activate"]
-        if terminate_existing:
-            options.append("--terminate-existing")
-        if environment:
-            options.extend(
-                ["--environment-variables", self.encode_environment(environment)]
-            )
-        launch_arguments = self.validate_launch_arguments(args or [])
-
-        outcome = self.run(
-            self.command(
-                ["device", "process", "launch"],
-                *options,
-                "--",
-                target,
-                *launch_arguments,
-            )
+        target, pid = self._launch_process(
+            app_id,
+            args=args,
+            environment=environment,
+            terminate_existing=terminate_existing,
+            activate=activate,
         )
-        result = self.require(outcome, f"launch of {target}")
-        process = result.get("process")
-        pid = process.get("processIdentifier") if isinstance(process, dict) else None
-        if not isinstance(pid, int):
-            raise XcrunCLIError(
-                f"{_LOG_TAG} Launch of {target} returned no PID: {result!r}"
-            )
-        logger.info(f"{_LOG_TAG} Launched {target} on {self.device_id} with PID {pid}")
         if not app_id:
             self.last_launch_pid = pid
             self.last_launch_app_id = target
@@ -457,36 +477,15 @@ class XcrunCLI:
         target = self._resolve_app_id(app_id)
         if self._app_record(target, strict=True) is None:
             raise AppNotInstalledError(f"App not installed: {target}")
-
-        options: list[str] = ["--activate" if activate else "--no-activate"]
-        if terminate_existing:
-            options.append("--terminate-existing")
-        if environment:
-            options.extend(
-                ["--environment-variables", self.encode_environment(environment)]
-            )
-        launch_arguments = self.validate_launch_arguments(args or [])
-
-        logger.info(f"{_LOG_TAG} Launching {target} on {self.device_id}")
-        outcome = self.run(
-            self.command(
-                ["device", "process", "launch"],
-                *options,
-                "--",
-                target,
-                *launch_arguments,
-            )
+        target, pid = self._launch_process(
+            target,
+            args=args,
+            environment=environment,
+            terminate_existing=terminate_existing,
+            activate=activate,
         )
-        result = self.require(outcome, f"launch of {target}")
-        process = result.get("process")
-        pid = process.get("processIdentifier") if isinstance(process, dict) else None
-        if not isinstance(pid, int):
-            raise XcrunCLIError(
-                f"{_LOG_TAG} Launch of {target} returned no PID: {result!r}"
-            )
         self.last_launch_pid = pid
         self.last_launch_app_id = target
-        logger.info(f"{_LOG_TAG} Launched {target} on {self.device_id} with PID {pid}")
 
     def _processes(self) -> list[dict[str, Any]]:
         """Return the device process table.
