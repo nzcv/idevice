@@ -112,11 +112,6 @@ def test_host_is_running_expected_state(
     assert ios3_device.host_is_running() is expect_running
 
 
-def test_swipe_not_implemented(ios3_device: IOSDevice3) -> None:
-    with pytest.raises(NotImplementedError, match="swipe"):
-        ios3_device.swipe(0, 0, 100, 100)
-
-
 def test_afc_push_pull_roundtrip(ios3_device: IOSDevice3, tmp_path: Path) -> None:
     remote_name = "idevice_integration_afc_test.txt"
     payload = b"idevice ios3 afc integration\n"

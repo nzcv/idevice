@@ -150,18 +150,6 @@ class WindowsDevice(DeviceBase):
     def host_is_running(self) -> bool:
         return False
 
-    def swipe(
-        self,
-        x1: int,
-        y1: int,
-        x2: int,
-        y2: int,
-        *,
-        duration_ms: int = 300,
-    ) -> None:
-        del x1, y1, x2, y2, duration_ms
-        raise NotImplementedError("swipe is not supported on Windows devices")
-
     def push(
         self,
         local: Path | str,

@@ -804,18 +804,6 @@ class IOSDevice4(DeviceBase):
             f"{_LOG_TAG} {operation} is not supported by the ios4 lifecycle backend"
         )
 
-    def swipe(
-        self,
-        x1: int,
-        y1: int,
-        x2: int,
-        y2: int,
-        *,
-        duration_ms: int = 300,
-    ) -> None:
-        del x1, y1, x2, y2, duration_ms
-        self._unsupported("swipe")
-
     def push(
         self,
         local: Path | str,

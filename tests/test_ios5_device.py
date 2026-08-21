@@ -1078,10 +1078,8 @@ def test_documents_rm_reports_an_ios4_command_error(
     assert ios5_device.documents_rm(APP_ID, "saves") is False
 
 
-def test_operations_without_a_coredevice_service_are_unsupported(
+def test_delete2_without_a_coredevice_service_is_unsupported(
     ios5_device: IOSDevice5,
 ) -> None:
-    with pytest.raises(NotImplementedError, match="swipe"):
-        ios5_device.swipe(0, 0, 10, 10)
     with pytest.raises(NotImplementedError, match="delete2"):
         ios5_device.delete2(AppDataPath.Persistent, "saves")

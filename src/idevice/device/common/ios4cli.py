@@ -513,10 +513,6 @@ class IOS4CLI:
         del data_path, remote, local
         self._unsupported("pull2")
 
-    def swipe(self, *args: object, **kwargs: object) -> None:
-        del args, kwargs
-        self._unsupported("swipe")
-
     def delete2(self, data_path: AppDataPath, remote: str) -> bool:
         del data_path, remote
         self._unsupported("delete2")

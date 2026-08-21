@@ -410,17 +410,6 @@ class IOSDevice5(DeviceBase):
             self._log_fallback("pull2", exc)
             return self._ios4cli.pull2(data_path, remote, local)
 
-    def swipe(
-        self,
-        x1: int,
-        y1: int,
-        x2: int,
-        y2: int,
-        *,
-        duration_ms: int = 300,
-    ) -> None:
-        self._ios4cli.swipe(x1, y1, x2, y2, duration_ms=duration_ms)
-
     def delete2(self, data_path: AppDataPath, remote: str) -> bool:
         return self._ios4cli.delete2(data_path, remote)
 

@@ -9,13 +9,13 @@ The package ships two complementary APIs:
 
 ## Platform status
 
-| Platform | Backend | App lifecycle | File transfer | Documents sandbox | Swipe | UI automation |
-|----------|---------|---------------|---------------|-------------------|-------|---------------|
-| iOS | [go-ios](https://github.com/danielpaulus/go-ios) (`IOSDevice`) | Yes | Yes | — | — | Planned (WDA) |
-| iOS | [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) (`IOSDevice3`) | Yes | Yes (AFC + app sandbox) | Yes | — | Planned (WDA) |
-| iOS | ios4 (`IOSDevice4`) | Yes | — | Yes (`afc --documents`) | — | Yes (WDA) |
-| Android | adb (`AndroidDevice`) | Yes | Yes | — | Yes | Yes (`AndroidUIAuto`) |
-| Windows | PowerShell (`WindowsDevice`) | Yes | — | Yes (local filesystem) | — | Planned |
+| Platform | Backend | App lifecycle | File transfer | Documents sandbox | UI automation |
+|----------|---------|---------------|---------------|-------------------|---------------|
+| iOS | [go-ios](https://github.com/danielpaulus/go-ios) (`IOSDevice`) | Yes | Yes | — | Planned (WDA) |
+| iOS | [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) (`IOSDevice3`) | Yes | Yes (AFC + app sandbox) | Yes | Planned (WDA) |
+| iOS | ios4 (`IOSDevice4`) | Yes | — | Yes (`afc --documents`) | Yes (WDA) |
+| Android | adb (`AndroidDevice`) | Yes | Yes | — | Yes (`AndroidUIAuto`) |
+| Windows | PowerShell (`WindowsDevice`) | Yes | — | Yes (local filesystem) | Planned |
 
 macOS and HarmonyOS are not implemented yet.
 
@@ -125,12 +125,6 @@ game.screenshot("screen.png")
 snapshot = game.capture_memgraph("trash-dash.memgraph")  # shells out to ios4
 ```
 
-Android swipe (via `adb shell input swipe`):
-
-```python
-device.swipe(100, 800, 100, 200, duration_ms=300)
-```
-
 iOS Documents sandbox (`IOSDevice3` and `IOSDevice4` — requires file-sharing entitlements):
 
 ```python
@@ -169,7 +163,7 @@ device.documents_rm("MyApp.exe", "Logs")
 Runnable scripts under `examples/` auto-detect the first connected device when no ID is passed:
 
 ```bash
-# Android: launch, push/pull, swipe (optional --apk / --package)
+# Android: launch, push/pull (optional --apk / --package)
 uv run python examples/android_device.py
 
 # iOS (pymobiledevice3): lifecycle, AFC, app sandbox, Documents API
@@ -217,7 +211,6 @@ Every platform implementation shares the same interface:
 - `push(local, remote, app_id=None, documents_only=False)` / `pull(remote, local, app_id=None, documents_only=True)` — host ↔ device file transfer
 - `ls(remote, app_id=None, recursive=False)` — list a remote directory on the device
 - `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox; `IOSDevice5.documents_rm` delegates recursive removal to the `ios4` AFC service because CoreDevice has no delete command
-- `swipe(x1, y1, x2, y2, duration_ms=300)` — touch gesture (Android implemented; iOS/Windows raise `NotImplementedError`)
 - `tap(x, y, app_id=None)` — normalized touch input, implemented by `IOSDevice4` through WebDriverAgent and `IOSDevice5` through iwda2
 - `screenshot(local)` — capture the screen to a host file
 - `host_is_running()` — whether WebDriverAgent / UIAutomator2 host process is up
@@ -230,7 +223,7 @@ all platforms.
 
 ### `UIAutoBase`
 
-Higher-level UI helpers built on top of device tooling. Currently only `AndroidUIAuto` is available (`swipe`, `dismiss_post_install_dialogs`, hierarchy access).
+Higher-level UI helpers built on top of device tooling. Currently only `AndroidUIAuto` is available (`dismiss_post_install_dialogs`, hierarchy access).
 
 ### iOS backends
 
@@ -272,7 +265,7 @@ CoreDevice CLI, so it needs macOS with Xcode but no third-party binary:
 - Screen capture via `device capture screenshot` on Xcode 27+, falling back to `ios4`
 - `capture_memgraph` shells out to `ios4`: CoreDevice exposes no memory-graph service
 - `documents_rm` contains the same `ios4 afc --documents` workflow as `IOSDevice4.documents_rm`: inspect with `info`, then call `remove` for a file or `remove_all` for a directory
-- `delete2` and `swipe` raise `NotImplementedError` — CoreDevice has no general file-removal or touch-injection service
+- `delete2` raises `NotImplementedError` — CoreDevice has no general file-removal service
 
 Every command is parsed from devicectl's JSON output, the only interface Apple
 guarantees to keep stable, and errors surface as the flattened

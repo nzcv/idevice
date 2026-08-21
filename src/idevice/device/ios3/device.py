@@ -202,20 +202,6 @@ class IOSDevice3(DeviceBase):
         logger.debug(f"{_LOG_TAG} Cached app info for app_id={app_id}: {cached}")
         return cached
 
-    def swipe(
-        self,
-        x1: int,
-        y1: int,
-        x2: int,
-        y2: int,
-        *,
-        duration_ms: int = 300,
-    ) -> None:
-        del x1, y1, x2, y2, duration_ms
-        raise NotImplementedError(
-            f"{_LOG_TAG} swipe is not supported on iOS yet; use WebDriverAgent for touch input"
-        )
-
     def host_is_running(self) -> bool:
         cmd = self._command("developer", "dvt", "proclist")
         result = self._runner.run(cmd, check=False)

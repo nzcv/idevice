@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Simple :class:`AndroidDevice` example: launch, file transfer, and swipe.
+"""Simple :class:`AndroidDevice` example: launch and file transfer.
 
 Prerequisites:
     - ``adb`` on PATH (or set ``IDEVICE_ADB_BINARY``)
@@ -149,12 +149,6 @@ def _demo_documents(device: AndroidDevice, package: str) -> None:
             logger.warning("Pull failed or path missing: %s", first)
 
 
-def _demo_swipe(device: AndroidDevice) -> None:
-    """Swipe upward on the screen (home screen or current app)."""
-    logger.info("Swipe up (100, 800) -> (100, 200)")
-    device.swipe(100, 800, 100, 200, duration_ms=300)
-
-
 def _demo_install_uninstall(
     device: AndroidDevice, apk_path: Path, package: str
 ) -> None:
@@ -201,11 +195,6 @@ def main(argv: list[str] | None = None) -> int:
         "--skip-transfer",
         action="store_true",
         help="Skip push/pull demo",
-    )
-    parser.add_argument(
-        "--skip-swipe",
-        action="store_true",
-        help="Skip swipe demo",
     )
     parser.add_argument(
         "--documents-package",
@@ -260,9 +249,6 @@ def main(argv: list[str] | None = None) -> int:
         except (FileNotFoundError, AndroidDeviceError) as exc:
             logger.error("Push/pull failed: %s", exc)
             return 1
-
-    if not args.skip_swipe:
-        _demo_swipe(device)
 
     if not args.skip_documents:
         try:

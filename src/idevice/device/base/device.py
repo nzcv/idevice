@@ -274,31 +274,6 @@ class DeviceBase(ABC):
         raise NotImplementedError(f"tap is not supported on {self.platform} devices")
 
     @abstractmethod
-    def swipe(
-        self,
-        x1: int,
-        y1: int,
-        x2: int,
-        y2: int,
-        *,
-        duration_ms: int = 300,
-    ) -> None:
-        """Swipe on the bound device from ``(x1, y1)`` to ``(x2, y2)``.
-
-        Args:
-            x1: Start X coordinate in pixels.
-            y1: Start Y coordinate in pixels.
-            x2: End X coordinate in pixels.
-            y2: End Y coordinate in pixels.
-            duration_ms: Gesture duration in milliseconds.
-
-        Raises:
-            ValueError: If ``duration_ms`` is not positive.
-            NotImplementedError: On platforms without touch input support.
-        """
-        raise NotImplementedError
-
-    @abstractmethod
     def host_is_running(self) -> bool:
         """Check if the WDA/UIAutomator2  is running on the bound device.
 

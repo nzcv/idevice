@@ -88,18 +88,6 @@ class DummyDevice(DeviceBase):
         self._noop("get_installed_pkg_name")
         return None
 
-    def swipe(
-        self,
-        x1: int,
-        y1: int,
-        x2: int,
-        y2: int,
-        *,
-        duration_ms: int = 300,
-    ) -> None:
-        del x1, y1, x2, y2, duration_ms
-        self._noop("swipe")
-
     def host_is_running(self) -> bool:
         self._noop("host_is_running")
         return False

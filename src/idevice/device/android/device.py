@@ -170,37 +170,6 @@ class AndroidDevice(DeviceBase):
     def host_is_running(self) -> bool:
         return True
 
-    def swipe(
-        self,
-        x1: int,
-        y1: int,
-        x2: int,
-        y2: int,
-        *,
-        duration_ms: int = 300,
-    ) -> None:
-        """Swipe on the device via ``adb shell input swipe``."""
-        if duration_ms <= 0:
-            raise ValueError("duration_ms must be a positive integer")
-        logger.info(
-            f"[AndroidDevice] Swiping on {self.device_id} "
-            f"from ({x1}, {y1}) to ({x2}, {y2}) over {duration_ms}ms"
-        )
-        command = self._base_command()
-        command.extend(
-            [
-                "shell",
-                "input",
-                "swipe",
-                str(x1),
-                str(y1),
-                str(x2),
-                str(y2),
-                str(duration_ms),
-            ]
-        )
-        self._runner.run(command)
-
     def push(
         self,
         local: Path | str,
