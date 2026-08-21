@@ -17,7 +17,6 @@ from idevice.device.base.errors import (
     DeviceNotFoundError,
 )
 from idevice.device.base.runner import CommandResult, SubprocessRunner
-from idevice.device.cache import InstalledAppCache, InstalledAppInfo
 from idevice.device.config import ideviceinstaller_binary, ios4_binary
 
 logger = logging.getLogger(__name__)
@@ -59,17 +58,12 @@ class IOS4CLI:
         *,
         binary: str | None = None,
         runner: SubprocessRunner | None = None,
-        app_cache: InstalledAppCache | None = None,
-        cache_dir: Path | None = None,
     ) -> None:
         if not device_id or not isinstance(device_id, str):
             raise ValueError("device_id is required and must be a non-empty string")
         self.device_id = device_id
         self.binary = binary or ios4_binary()
         self.runner = runner or SubprocessRunner()
-        self.app_cache = app_cache or InstalledAppCache(
-            device_id, cache_dir=cache_dir
-        )
         self.last_launch_pid: int | None = None
         self.last_launch_app_id = ""
 
@@ -169,8 +163,8 @@ class IOS4CLI:
             encoded.append(argument.replace("\\", "\\\\").replace(",", "\\,"))
         return ",".join(encoded)
 
-    def install(self, package_path: Path, app_id: str | None = None) -> bool:
-        """Install a package and optionally cache its bundle id."""
+    def install(self, package_path: Path) -> bool:
+        """Install a package and return whether ios4 reported success."""
         package_path = Path(package_path)
         if not package_path.exists():
             raise FileNotFoundError(f"Package not found: {package_path}")
@@ -181,8 +175,6 @@ class IOS4CLI:
         succeeded = result.returncode == 0 and any(
             marker in combined_output for marker in _INSTALL_SUCCESS_MARKERS
         )
-        if succeeded and app_id:
-            self.app_cache.add(app_id, version=package_path.stem, path=None)
         return succeeded
 
     def uninstall(self, app_id: str) -> None:
@@ -190,7 +182,6 @@ class IOS4CLI:
         if not app_id:
             raise ValueError("app_id is required and must be a non-empty string")
         self.run("app_service", "uninstall", app_id)
-        self.app_cache.remove(app_id)
 
     def is_installed(self, app_id: str) -> bool:
         """Check an exact bundle id using ``application_listing``."""
@@ -243,12 +234,6 @@ class IOS4CLI:
         if self.last_launch_app_id == app_id:
             self.last_launch_pid = None
             self.last_launch_app_id = ""
-
-    def get_installed_pkg_name(self, app_id: str) -> InstalledAppInfo | None:
-        """Return cached package information if the app remains installed."""
-        if not self.is_installed(app_id):
-            return None
-        return self.app_cache.get(app_id)
 
     def host_is_running(self) -> bool:
         """Return whether a WebDriverAgent-style process is running."""

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 import requests
 
-from idevice.device.base.device import AppDataPath
+from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.base.errors import (
     AppNotInstalledError,
     CommandExecutionError,
@@ -18,6 +18,7 @@ from idevice.device.base.errors import (
 )
 from idevice.device.base.runner import CommandResult
 from idevice.device.common.ios4cli import IOS4CLI
+from idevice.device.common.xcruncli import XcrunCLI
 from idevice.device.ios5.device import (
     DevicectlOutcome,
     IOSDevice5,
@@ -87,10 +88,22 @@ def test_ios5_uses_the_common_ios4cli_type(ios5_device: IOSDevice5) -> None:
     with patch(
         "idevice.device.ios5.device.shutil.which", return_value=IOS4_BINARY
     ):
-        backend = ios5_device._ios4cli()
+        backend = ios5_device._get_ios4cli()
 
     assert isinstance(backend, IOS4CLI)
+    assert ios5_device._ios4cli is backend
     assert backend.runner is ios5_device._runner
+
+
+def test_ios5_composes_xcruncli_instead_of_inheriting_it(
+    ios5_device: IOSDevice5,
+) -> None:
+    assert isinstance(ios5_device, DeviceBase)
+    assert not isinstance(ios5_device, XcrunCLI)
+    assert isinstance(ios5_device._xcruncli, XcrunCLI)
+    assert ios5_device._xcruncli.runner is ios5_device._runner
+    assert not hasattr(ios5_device._xcruncli, "app_cache")
+    assert ios5_device._app_cache is not None
 
 
 def test_run_parses_json_document_and_removes_temporary_file(
@@ -219,7 +232,8 @@ def test_default_udid_returns_the_first_usb_device() -> None:
         ]
     }
     with patch(
-        "idevice.device.ios5.device._run_devicectl", return_value=outcome(devices)
+        "idevice.device.common.xcruncli._run_devicectl",
+        return_value=outcome(devices),
     ):
         assert IOSDevice5.default_udid() == UDID
 
@@ -241,7 +255,8 @@ def test_default_udid_rejects_devices_that_are_not_cabled() -> None:
         ]
     }
     with patch(
-        "idevice.device.ios5.device._run_devicectl", return_value=outcome(devices)
+        "idevice.device.common.xcruncli._run_devicectl",
+        return_value=outcome(devices),
     ):
         with pytest.raises(DeviceNotFoundError, match="No USB-attached device"):
             IOSDevice5.default_udid()
@@ -249,7 +264,8 @@ def test_default_udid_rejects_devices_that_are_not_cabled() -> None:
 
 def test_default_udid_rejects_an_empty_device_list() -> None:
     with patch(
-        "idevice.device.ios5.device._run_devicectl", return_value=outcome({})
+        "idevice.device.common.xcruncli._run_devicectl",
+        return_value=outcome({}),
     ):
         with pytest.raises(DeviceNotFoundError):
             IOSDevice5.default_udid()
@@ -308,11 +324,12 @@ def test_install_falls_back_to_ios4_after_devicectl_failure(
     )
     ios4cli = MagicMock()
     ios4cli.install.return_value = True
-    ios5_device._ios4cli = MagicMock(return_value=ios4cli)
+    ios5_device._get_ios4cli = MagicMock(return_value=ios4cli)
 
     assert ios5_device.install(ipa, app_id=APP_ID) is True
 
-    ios4cli.install.assert_called_once_with(ipa, APP_ID)
+    ios4cli.install.assert_called_once_with(ipa)
+    assert ios5_device._app_cache.get(APP_ID) is not None
 
 
 def test_is_installed_falls_back_only_when_devicectl_fails(
@@ -320,7 +337,7 @@ def test_is_installed_falls_back_only_when_devicectl_fails(
 ) -> None:
     ios4cli = MagicMock()
     ios4cli.is_installed.return_value = True
-    ios5_device._ios4cli = MagicMock(return_value=ios4cli)
+    ios5_device._get_ios4cli = MagicMock(return_value=ios4cli)
     ios5_device._run = MagicMock(return_value=outcome({"apps": []}))
 
     assert ios5_device.is_installed(APP_ID) is False
@@ -400,6 +417,7 @@ def test_launch_rejects_an_app_that_is_not_installed(
 def test_launch_reports_an_unreachable_device_as_such(
     ios5_device: IOSDevice5,
 ) -> None:
+    ios5_device._get_ios4cli = MagicMock(return_value=None)
     ios5_device._run = MagicMock(
         return_value=outcome(returncode=1, error="The tunnel was interrupted.")
     )
@@ -409,6 +427,7 @@ def test_launch_reports_an_unreachable_device_as_such(
 
 
 def test_launch_requires_a_pid_in_the_result(ios5_device: IOSDevice5) -> None:
+    ios5_device._get_ios4cli = MagicMock(return_value=None)
     ios5_device._run = MagicMock(
         side_effect=[app_listing(APP_ID, APP_URL), outcome({"process": {}})]
     )
@@ -901,6 +920,7 @@ def test_documents_ls_lists_the_documents_root(ios5_device: IOSDevice5) -> None:
 
 
 def test_ls_reports_a_failed_listing(ios5_device: IOSDevice5) -> None:
+    ios5_device._get_ios4cli = MagicMock(return_value=None)
     ios5_device._run = MagicMock(
         return_value=outcome(returncode=1, error="No such file or directory")
     )
@@ -941,7 +961,7 @@ def test_documents_rm_routes_directly_to_ios4(
 ) -> None:
     ios4cli = MagicMock()
     ios4cli.documents_rm.return_value = True
-    ios5_device._ios4cli = MagicMock(return_value=ios4cli)
+    ios5_device._get_ios4cli = MagicMock(return_value=ios4cli)
     ios5_device._run = MagicMock()
 
     assert ios5_device.documents_rm(APP_ID, "saves") is True

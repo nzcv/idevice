@@ -108,8 +108,6 @@ class IOSDevice4(DeviceBase):
             device_id,
             binary=ios4_binary(),
             runner=SubprocessRunner(),
-            app_cache=self._app_cache,
-            cache_dir=cache_dir,
         )
         self._last_launch_pid: int | None = None
         self._last_launch_app_id = ""

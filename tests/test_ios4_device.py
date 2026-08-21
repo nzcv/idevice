@@ -41,6 +41,7 @@ def test_ios4_device_composes_the_common_ios4cli(
     assert isinstance(ios4_device._ios4cli, IOS4CLI)
     assert not issubclass(IOS4CLI, IOSDevice4)
     assert ios4_device._runner is ios4_device._ios4cli.runner
+    assert not hasattr(ios4_device._ios4cli, "app_cache")
 
 
 def result(
