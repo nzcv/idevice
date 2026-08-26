@@ -186,7 +186,7 @@ class IOSDevice5(DeviceBase):
         self._launch_with_fallback(
             app_id,
             args=args,
-            environment=environment,
+            environment=environment or None,
             terminate_existing=terminate_existing,
             activate=activate,
             check_installed=True,

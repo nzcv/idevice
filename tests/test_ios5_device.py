@@ -426,6 +426,22 @@ def test_launch_passes_environment_and_ordered_arguments(
     ]
 
 
+def test_launch_app_normalizes_an_empty_environment(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios5_device._xcruncli.launch_app = MagicMock()
+
+    ios5_device.launch_app(APP_ID, environment={})
+
+    ios5_device._xcruncli.launch_app.assert_called_once_with(
+        APP_ID,
+        args=None,
+        environment=None,
+        terminate_existing=True,
+        activate=True,
+    )
+
+
 def test_launch_skips_install_check_for_an_explicit_app_id(
     ios5_device: IOSDevice5,
 ) -> None:
@@ -469,6 +485,24 @@ def test_launch_app_falls_back_to_ios4(ios5_device: IOSDevice5) -> None:
         APP_ID, args=["--debug"], environment={"MODE": "test"}
     )
     assert ios5_device.last_launch_pid == 912
+
+
+def test_launch_app_fallback_normalizes_an_empty_environment(
+    ios5_device: IOSDevice5,
+) -> None:
+    ios5_device._xcruncli.launch_app = MagicMock(
+        side_effect=IOSDevice5Error("device offline")
+    )
+    ios4cli = MagicMock()
+    ios4cli.last_launch_pid = 912
+    ios4cli.last_launch_app_id = APP_ID
+    ios5_device._ios4cli = ios4cli
+
+    ios5_device.launch_app(APP_ID, environment={})
+
+    ios4cli.launch_app.assert_called_once_with(
+        APP_ID, args=None, environment=None
+    )
 
 
 def test_launch_rejects_an_app_that_is_not_installed(
