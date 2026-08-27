@@ -8,6 +8,7 @@ USB-connected device via the iRecord control server
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from idevice.record import config
 from idevice.record.base.client import IRecordClient
@@ -86,8 +87,14 @@ class MacRecord(RecordBase):
         """Stop recording the bound device via the iRecord server."""
         result = self.client.stop(self.device_udid, upload=upload, preset=preset)
         logger.info(f"{_LOG_TAG} stopped recording {self.device_udid}")
+        logger.info(f"{_LOG_TAG} stopped recording {result}")
         return result
 
     def status(self) -> dict:
         """iRecord recording status for the bound device."""
         return self.client.status(self.device_udid)
+
+    @property
+    def out_path(self) -> Path | None:
+        """Return ``None`` because iRecord stores output on the remote host."""
+        return None

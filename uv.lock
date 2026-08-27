@@ -1068,7 +1068,7 @@ wheels = [
 
 [[package]]
 name = "idevice"
-version = "0.27.0"
+version = "1.0.2"
 source = { editable = "." }
 dependencies = [
     { name = "facebook-wda" },
