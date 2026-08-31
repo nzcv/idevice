@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -159,3 +160,52 @@ def test_launch_app_rejects_uninstalled_app(ios3_device: IOSDevice3) -> None:
         ios3_device.launch_app(APP_ID)
 
     assert ios3_device._runner.run.call_count == 1
+
+
+def test_launch_app_passes_args_and_environment(
+    ios3_device: IOSDevice3,
+) -> None:
+    ios3_device._runner.run.side_effect = [
+        CommandResult(returncode=0, stdout=f'{{"{APP_ID}": {{}}}}', stderr=""),
+        CommandResult(returncode=0, stdout="", stderr=""),
+    ]
+
+    ios3_device.launch_app(
+        APP_ID,
+        args=["--mode", "debug", "--label", "foo bar"],
+        environment={"MallocStackLogging": "1", "FOO": "bar=baz"},
+    )
+
+    assert ios3_device._runner.run.call_args_list[1].args[0] == [
+        BINARY,
+        "developer",
+        "dvt",
+        "launch",
+        shlex.join([APP_ID, "--mode", "debug", "--label", "foo bar"]),
+        "--env",
+        "MallocStackLogging=1",
+        "--env",
+        "FOO=bar=baz",
+        "--udid",
+        UDID,
+    ]
+
+
+def test_launch_app_rejects_empty_argument(ios3_device: IOSDevice3) -> None:
+    ios3_device._runner.run.return_value = CommandResult(
+        returncode=0, stdout=f'{{"{APP_ID}": {{}}}}', stderr=""
+    )
+
+    with pytest.raises(ValueError, match="cannot be empty"):
+        ios3_device.launch_app(APP_ID, args=[""])
+
+
+def test_launch_app_rejects_invalid_environment_name(
+    ios3_device: IOSDevice3,
+) -> None:
+    ios3_device._runner.run.return_value = CommandResult(
+        returncode=0, stdout=f'{{"{APP_ID}": {{}}}}', stderr=""
+    )
+
+    with pytest.raises(ValueError, match="environment names"):
+        ios3_device.launch_app(APP_ID, environment={"FOO=BAR": "1"})

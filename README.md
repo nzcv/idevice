@@ -232,7 +232,7 @@ Higher-level UI helpers built on top of device tooling. Currently only `AndroidU
 **`IOSDevice3` (pymobiledevice3)** — uses pymobiledevice3 services:
 
 - App install/uninstall/list via `apps`
-- Process control via `developer dvt launch` / `pkill`
+- Process control via `developer dvt launch` / `pkill`, with optional `argv` and `--env KEY=VALUE` entries
 - File transfer via `afc push/pull` or `apps push/pull` (app sandbox, with optional `--documents`)
 - Documents sandbox via the pymobiledevice3 Python library (House Arrest AFC): `documents_exists`, `documents_ls`, `documents_push`, `documents_pull`, `documents_rm`
 - Normalized screen taps and performance monitor via the shared iwda2 mixin (`tap`, `start_moniter`, `stop_moniter`)

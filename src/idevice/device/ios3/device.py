@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shlex
 import shutil
 import sys
 from collections.abc import AsyncIterator
@@ -170,7 +171,47 @@ class IOSDevice3(IWDA2Mixin, DeviceBase):
             )
         return False
 
-    def launch(self, app_id: str | None = None) -> None:
+    @staticmethod
+    def _encode_launch_arguments(
+        bundle_id: str, arguments: list[str] | None
+    ) -> str:
+        """Encode bundle id plus argv as pymobiledevice3's launch string.
+
+        ``developer dvt launch`` takes one positional string and then
+        ``shlex.split``s it: the first token is the bundle id, the rest are
+        process arguments.
+        """
+        tokens = [bundle_id]
+        for index, argument in enumerate(arguments or []):
+            if not isinstance(argument, str):
+                raise TypeError(
+                    f"launch argument at index {index} must be a string"
+                )
+            if not argument:
+                raise ValueError(
+                    f"launch argument at index {index} cannot be empty"
+                )
+            tokens.append(argument)
+        return shlex.join(tokens)
+
+    @staticmethod
+    def _encode_environment_entry(key: str, value: str) -> str:
+        """Encode one pair as pymobiledevice3 ``--env KEY=VALUE``."""
+        if not key or not isinstance(key, str) or "=" in key:
+            raise ValueError(
+                "environment names must be non-empty and cannot contain '='"
+            )
+        if not isinstance(value, str):
+            raise TypeError(f"environment value for {key!r} must be a string")
+        return f"{key}={value}"
+
+    def launch(
+        self,
+        app_id: str | None = None,
+        *,
+        args: list[str] | None = None,
+        environment: dict[str, str] | None = None,
+    ) -> None:
         """Launch an app through ``developer dvt launch``.
 
         Unlike :meth:`launch_app`, this does not check whether the bundle is
@@ -179,24 +220,65 @@ class IOSDevice3(IWDA2Mixin, DeviceBase):
         Args:
             app_id: Bundle identifier to launch. When omitted or empty, uses
                 the bound :attr:`package_name`.
+            args: Ordered command-line arguments passed to the app process.
+            environment: Environment variables injected before process start.
 
         Raises:
-            ValueError: If both ``app_id`` and :attr:`package_name` are empty.
+            ValueError: If both ``app_id`` and :attr:`package_name` are empty,
+                or if an argument / environment name is unusable.
+            TypeError: If an argument or environment value is not a string.
             CommandExecutionError: If the pymobiledevice3 command fails.
         """
         target = self._resolve_app_id(app_id)
+        command = [
+            "developer",
+            "dvt",
+            "launch",
+            self._encode_launch_arguments(target, args),
+        ]
+        for key, value in (environment or {}).items():
+            command.extend(
+                ["--env", self._encode_environment_entry(key, value)]
+            )
         logger.info(
             f"{_LOG_TAG} Launching {target} through dvt launch on "
             f"{self.device_id}"
         )
-        self._runner.run(self._command("developer", "dvt", "launch", target))
+        self._runner.run(self._command(*command))
 
-    def launch_app(self, app_id: str | None = None) -> None:
+    def launch_app(
+        self,
+        app_id: str | None = None,
+        *,
+        args: list[str] | None = None,
+        environment: dict[str, str] | None = None,
+    ) -> None:
+        """Launch an installed app with optional environment and ``argv``.
+
+        The launch goes through ``developer dvt launch``. Arguments become
+        extra tokens in the CLI's single launch string; environment values
+        become repeated ``--env KEY=VALUE`` flags.
+
+        Args:
+            app_id: Bundle identifier to launch. When omitted or empty, uses
+                the bound :attr:`package_name`.
+            args: Ordered command-line arguments passed to the app process.
+            environment: Environment variables injected before process start.
+
+        Raises:
+            ValueError: If both ``app_id`` and :attr:`package_name` are empty,
+                or if an argument / environment name is unusable.
+            TypeError: If an argument or environment value is not a string.
+            AppNotInstalledError: If the resolved bundle id is not installed.
+            CommandExecutionError: If the pymobiledevice3 command fails.
+        """
         target = self._resolve_app_id(app_id)
         if not self.is_installed(target):
             raise AppNotInstalledError(f"App not installed: {target}")
-        logger.info(f"{_LOG_TAG} Launching app on iOS device {self.device_id}: {target}")
-        self.launch(target)
+        logger.info(
+            f"{_LOG_TAG} Launching app on iOS device {self.device_id}: {target}"
+        )
+        self.launch(target, args=args, environment=environment)
 
     def stop_app(self, app_id: str | None = None) -> None:
         target = self._resolve_app_id(app_id)
