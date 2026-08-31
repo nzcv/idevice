@@ -117,7 +117,7 @@ class Device(metaclass=_DeviceMeta):
             device: DeviceBase = IOSDevice5(
                 device_id, device_ip=device_ip, package_name=package_name
             )
-        elif p is Platform.IOS4 or os.environ.get("GAUTO_IOS4", "0") == "1":
+        elif p is Platform.IOS4:
             device = IOSDevice4(
                 device_id, device_ip=device_ip, package_name=package_name
             )
