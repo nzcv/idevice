@@ -31,7 +31,6 @@ _PID_PATTERN = re.compile(r"(?m)^PID:\s*(\d+)\s*$")
 _UDID_PATTERN = re.compile(
     r'UniqueDeviceID["\']?\s*:\s*String\(\s*"([^"\\]+)"\s*,?\s*\)'
 )
-_WDA_PROCESS_MARKERS = ("webdriveragent", "xctrunner")
 _DOCUMENTS_ROOT = "/Documents"
 _DOCUMENTS_DIR_IFMT = "S_IFDIR"
 _DOCUMENTS_FILE_IFMT = "S_IFREG"
@@ -233,14 +232,6 @@ class IOS4CLI:
         if self.last_launch_app_id == app_id:
             self.last_launch_pid = None
             self.last_launch_app_id = ""
-
-    def host_is_running(self) -> bool:
-        """Return whether a WebDriverAgent-style process is running."""
-        result = self.run("device_info", "processes", check=False)
-        if result.returncode != 0:
-            return False
-        output = result.stdout.lower()
-        return any(marker in output for marker in _WDA_PROCESS_MARKERS)
 
     def screenshot(self, local: Path | str) -> bool:
         """Capture atomically through the ios4 screenshot service."""

@@ -273,15 +273,6 @@ class DeviceBase(ABC):
         del x, y, app_id
         raise NotImplementedError(f"tap is not supported on {self.platform} devices")
 
-    @abstractmethod
-    def host_is_running(self) -> bool:
-        """Check if the WDA/UIAutomator2  is running on the bound device.
-
-        Returns:
-            bool: True if the WDA/UIAutomator2 is running, False otherwise.
-        """
-        raise NotImplementedError
-
     def capture_memgraph(
         self,
         output: Path | str,

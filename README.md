@@ -12,7 +12,7 @@ The package ships two complementary APIs:
 | Platform | Backend | App lifecycle | File transfer | Documents sandbox | UI automation |
 |----------|---------|---------------|---------------|-------------------|---------------|
 | iOS | [go-ios](https://github.com/danielpaulus/go-ios) (`IOSDevice`) | Yes | Yes | — | Planned (WDA) |
-| iOS | [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) (`IOSDevice3`) | Yes | Yes (AFC + app sandbox) | Yes | Planned (WDA) |
+| iOS | [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) (`IOSDevice3`) | Yes | Yes (AFC + app sandbox) | Yes | Yes (iwda2) |
 | iOS | ios4 (`IOSDevice4`) | Yes | — | Yes (`afc --documents`) | Yes (iwda2) |
 | Android | adb (`AndroidDevice`) | Yes | Yes | — | Yes (`AndroidUIAuto`) |
 | Windows | PowerShell (`WindowsDevice`) | Yes | — | Yes (local filesystem) | Planned |
@@ -211,10 +211,9 @@ Every platform implementation shares the same interface:
 - `push(local, remote, app_id=None, documents_only=False)` / `pull(remote, local, app_id=None, documents_only=True)` — host ↔ device file transfer
 - `ls(remote, app_id=None, recursive=False)` — list a remote directory on the device
 - `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox; `IOSDevice5.documents_rm` delegates recursive removal to the `ios4` AFC service because CoreDevice has no delete command
-- `tap(x, y, app_id=None)` — normalized touch input, implemented by `IOSDevice4` and `IOSDevice5` through iwda2
-- `start_moniter(duration=180)` / `stop_moniter()` — on-device performance monitor, implemented by `IOSDevice4` and `IOSDevice5` through iwda2
+- `tap(x, y, app_id=None)` — normalized touch input, implemented by `IOSDevice3`, `IOSDevice4`, and `IOSDevice5` through iwda2
+- `start_moniter(duration=180)` / `stop_moniter()` — on-device performance monitor, implemented by `IOSDevice3`, `IOSDevice4`, and `IOSDevice5` through iwda2
 - `screenshot(local)` — capture the screen to a host file
-- `host_is_running()` — whether WebDriverAgent / UIAutomator2 host process is up
 - `capture_memgraph(output, pid=None)` — capture a process memory snapshot (`IOSDevice4`, and `IOSDevice5` by shelling out to `ios4`)
 
 Use `Device.create(Platform, device_id=…, device_ip="", package_name=…)` or
@@ -236,6 +235,7 @@ Higher-level UI helpers built on top of device tooling. Currently only `AndroidU
 - Process control via `developer dvt launch` / `pkill`
 - File transfer via `afc push/pull` or `apps push/pull` (app sandbox, with optional `--documents`)
 - Documents sandbox via the pymobiledevice3 Python library (House Arrest AFC): `documents_exists`, `documents_ls`, `documents_push`, `documents_pull`, `documents_rm`
+- Normalized screen taps and performance monitor via the shared iwda2 mixin (`tap`, `start_moniter`, `stop_moniter`)
 - Developer-mode commands require a mounted DeveloperDiskImage; on iOS 17+ an active tunnel is required (`pymobiledevice3 remote start-tunnel`)
 
 **`IOSDevice4` (ios4)** — a game lifecycle backend using the Rust

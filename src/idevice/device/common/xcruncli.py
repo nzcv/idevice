@@ -22,7 +22,6 @@ from idevice.device.config import xcrun_binary
 logger = logging.getLogger(__name__)
 
 _LOG_TAG = "[IOSDevice5]"
-_WDA_PROCESS_MARKERS = ("webdriveragent", "xctrunner")
 _APP_DATA_DOMAIN = "appDataContainer"
 _WIRED_TRANSPORT = "wired"
 _DOCUMENTS_ROOT = "Documents"
@@ -550,14 +549,6 @@ class XcrunCLI:
         if self.last_launch_app_id == target:
             self.last_launch_pid = None
             self.last_launch_app_id = ""
-
-    def host_is_running(self) -> bool:
-        """Return whether a WebDriverAgent-style process is running."""
-        for entry in self._processes():
-            executable = str(entry.get("executable", "")).lower()
-            if any(marker in executable for marker in _WDA_PROCESS_MARKERS):
-                return True
-        return False
 
     def _supports_capture_screenshot(self) -> bool:
         """Return whether this Xcode ships ``device capture``, added in Xcode 27.

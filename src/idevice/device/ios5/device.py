@@ -238,13 +238,6 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
             installed = self._ios4cli.is_installed(app_id)
         return self._app_cache.get(app_id) if installed else None
 
-    def host_is_running(self) -> bool:
-        try:
-            return self._xcruncli.host_is_running()
-        except _DEVICETCL_FAILURES as exc:
-            self._log_fallback("host_is_running", exc)
-            return self._ios4cli.host_is_running()
-
     def screenshot(self, local: Path | str) -> bool:
         local_path = Path(local)
         if self._xcruncli.screenshot(local_path):

@@ -442,13 +442,6 @@ class IOSDevice4(IWDA2Mixin, DeviceBase):
             return None
         return self._app_cache.get(app_id)
 
-    def host_is_running(self) -> bool:
-        """Return whether a UI automation host process is running.
-
-        The ios4 backend does not start one, so this is always ``False``.
-        """
-        return False
-
     def screenshot(self, local: Path | str) -> bool:
         """Capture a screenshot with the ios4 screenshot service."""
         local_path = Path(local)

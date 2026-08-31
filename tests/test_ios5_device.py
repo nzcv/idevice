@@ -582,25 +582,6 @@ def test_stop_app_rejects_an_app_that_is_not_installed(
         ios5_device.stop_app(APP_ID)
 
 
-def test_host_is_running_detects_the_runner_executable(
-    ios5_device: IOSDevice5,
-) -> None:
-    ios5_device._xcruncli.run = MagicMock(
-        return_value=outcome(
-            {
-                "runningProcesses": [
-                    {
-                        "executable": "file:///Applications/WebDriverAgentRunner",
-                        "processIdentifier": 3,
-                    }
-                ]
-            }
-        )
-    )
-
-    assert ios5_device.host_is_running() is True
-
-
 def test_ios5_reuses_shared_iwda2_methods() -> None:
     assert IOSDevice5.tap is IWDA2Mixin.tap
     assert IOSDevice5.start_moniter is IWDA2Mixin.start_moniter

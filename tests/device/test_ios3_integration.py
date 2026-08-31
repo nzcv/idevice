@@ -13,7 +13,6 @@ Optional install round-trip::
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -85,31 +84,6 @@ def test_stop_app_rejects_empty_when_no_bound_package(
         ios3_device.stop_app("")
     with pytest.raises(ValueError, match="app_id"):
         ios3_device.stop_app()
-
-
-def test_host_is_running_returns_bool(ios3_device: IOSDevice3) -> None:
-    assert isinstance(ios3_device.host_is_running(), bool)
-
-
-@pytest.mark.parametrize(
-    ("expect_running", "env_value"),
-    [
-        pytest.param(True, "1", id="wda_running"),
-        pytest.param(False, "0", id="wda_not_running"),
-    ],
-)
-def test_host_is_running_expected_state(
-    ios3_device: IOSDevice3,
-    expect_running: bool,
-    env_value: str,
-) -> None:
-    """Run only when ``IDEVICE_IOS3_EXPECT_WDA`` is ``1`` (running) or ``0`` (not)."""
-    configured = os.environ.get("IDEVICE_IOS3_EXPECT_WDA", "").strip()
-    if configured != env_value:
-        pytest.skip(
-            "Set IDEVICE_IOS3_EXPECT_WDA=1 or =0 to assert WDA running state"
-        )
-    assert ios3_device.host_is_running() is expect_running
 
 
 def test_afc_push_pull_roundtrip(ios3_device: IOSDevice3, tmp_path: Path) -> None:

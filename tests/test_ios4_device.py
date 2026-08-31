@@ -559,11 +559,6 @@ def test_moniter_returns_false_without_device_ip(
     get.assert_not_called()
 
 
-def test_host_is_running_is_always_false(ios4_device: IOSDevice4) -> None:
-    assert ios4_device.host_is_running() is False
-    ios4_device._runner.run.assert_not_called()
-
-
 def test_argument_and_environment_validation() -> None:
     assert IOSDevice4._encode_launch_arguments(["foo,bar", r"C:\tmp"]) == (
         r"foo\,bar,C:\\tmp"

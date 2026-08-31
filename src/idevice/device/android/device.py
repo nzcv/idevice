@@ -167,9 +167,6 @@ class AndroidDevice(DeviceBase):
             return None
         return self._app_cache.get(app_id)
 
-    def host_is_running(self) -> bool:
-        return True
-
     def push(
         self,
         local: Path | str,

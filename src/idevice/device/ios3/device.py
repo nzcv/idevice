@@ -18,6 +18,7 @@ from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.base.errors import AppNotInstalledError
 from idevice.device.base.runner import SubprocessRunner
 from idevice.device.cache import InstalledAppCache, InstalledAppInfo
+from idevice.device.common.iwda2 import IWDA2Mixin
 from idevice.device.config import device_id as env_device_id
 from idevice.device.config import device_ip as env_device_ip
 from idevice.device.config import ideviceinstaller_binary, ios3_binary
@@ -26,26 +27,22 @@ logger = logging.getLogger('[IOSDevice3]')
 
 _LOG_TAG = "[IOSDevice3]"
 
-_WDA_PROCESS_MARKERS = (
-    "webdriveragent",
-    "xctrunner",
-)
-
 
 class IOSDevice3Error(RuntimeError):
     """Raised when an iOS (pymobiledevice3) device operation fails."""
 
 
-class IOSDevice3(DeviceBase):
+class IOSDevice3(IWDA2Mixin, DeviceBase):
     """``DeviceBase`` implementation for iOS using the pymobiledevice3 CLI.
 
     The pymobiledevice3 ``apps`` service handles install/uninstall/list and
     app-container file transfers, except that on macOS installation prefers the
     standalone libimobiledevice ``ideviceinstaller`` CLI when it is present on
-    the host. Process control (launch/kill) and
-    WebDriverAgent inspection go through the ``developer dvt`` instrumentation
-    APIs. Developer-mode commands require a mounted DeveloperDiskImage and, on
-    iOS 17+, an active tunnel (pymobiledevice3 retries with ``--tunnel``).
+    the host. Process control (launch/kill) goes through the
+    ``developer dvt`` instrumentation APIs. Developer-mode commands require a
+    mounted DeveloperDiskImage and, on iOS 17+, an active tunnel
+    (pymobiledevice3 retries with ``--tunnel``). ``tap``, ``start_moniter``,
+    and ``stop_moniter`` go through the shared iwda2 mixin.
     """
 
     def __init__(
@@ -201,20 +198,6 @@ class IOSDevice3(DeviceBase):
         cached = self._app_cache.get(app_id)
         logger.debug(f"{_LOG_TAG} Cached app info for app_id={app_id}: {cached}")
         return cached
-
-    def host_is_running(self) -> bool:
-        cmd = self._command("developer", "dvt", "proclist")
-        result = self._runner.run(cmd, check=False)
-        if result.returncode != 0:
-            logger.debug(
-                f"{_LOG_TAG} WDA host check failed on iOS device {self.device_id} "
-                f"(exit code {result.returncode})"
-            )
-            return False
-        output = result.stdout.lower()
-        running = any(marker in output for marker in _WDA_PROCESS_MARKERS)
-        logger.debug(f"{_LOG_TAG} WDA host running on iOS device {self.device_id}: {running}")
-        return running
 
     def push(
         self,

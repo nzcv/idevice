@@ -88,10 +88,6 @@ class DummyDevice(DeviceBase):
         self._noop("get_installed_pkg_name")
         return None
 
-    def host_is_running(self) -> bool:
-        self._noop("host_is_running")
-        return False
-
     def capture_memgraph(
         self,
         output: Path | str,

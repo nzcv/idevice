@@ -17,11 +17,6 @@ logger = logging.getLogger(__name__)
 
 _LOG_TAG = "[IOSDevice]"
 
-_WDA_PROCESS_MARKERS = (
-    "webdriveragent",
-    "xctrunner",
-)
-
 
 class IOSDeviceError(RuntimeError):
     """Raised when an iOS device operation fails."""
@@ -150,19 +145,6 @@ class IOSDevice(DeviceBase):
         if not self.is_installed(app_id):
             return None
         return self._app_cache.get(app_id)
-
-    def host_is_running(self) -> bool:
-        cmd = [self._binary, "--udid", self.device_id, "ps", "--apps"]
-        result = self._runner.run(cmd, check=False)
-        if result.returncode != 0:
-            logger.debug(
-                f"{_LOG_TAG} WDA host check failed on iOS device {self.device_id} (exit code {result.returncode})"
-            )
-            return False
-        output = result.stdout.lower()
-        running = any(marker in output for marker in _WDA_PROCESS_MARKERS)
-        logger.debug(f"{_LOG_TAG} WDA host running on iOS device {self.device_id}: {running}")
-        return running
 
     def push(
         self,

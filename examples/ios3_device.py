@@ -4,7 +4,7 @@
 Prerequisites:
     - ``pymobiledevice3`` on PATH (or set ``IDEVICE_IOS3_BINARY``)
     - USB-connected, paired iOS device
-    - Developer Mode enabled for ``launch_app`` / ``stop_app`` / ``host_is_running``
+    - Developer Mode enabled for ``launch_app`` / ``stop_app``
     - iOS 17+: active tunnel (``pymobiledevice3 remote start-tunnel``)
 
 Examples:
@@ -106,12 +106,6 @@ def _demo_launch_stop(device: IOSDevice3, app_id: str) -> None:
     device.launch_app(app_id)
     logger.info("Stopping %s", app_id)
     device.stop_app(app_id)
-
-
-def _demo_wda(device: IOSDevice3) -> None:
-    """Report whether WebDriverAgent / XCTest runner processes are up."""
-    running = device.host_is_running()
-    logger.info("WDA host running: %s", running)
 
 
 def _demo_afc(device: IOSDevice3, remote_name: str) -> None:
@@ -345,8 +339,6 @@ def main(argv: list[str] | None = None) -> int:
                 "Launch/stop failed (Developer Mode / tunnel / DDI?): %s", exc
             )
             return 1
-
-    _demo_wda(device)
 
     if not args.skip_afc:
         try:
