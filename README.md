@@ -13,7 +13,7 @@ The package ships two complementary APIs:
 |----------|---------|---------------|---------------|-------------------|---------------|
 | iOS | [go-ios](https://github.com/danielpaulus/go-ios) (`IOSDevice`) | Yes | Yes | — | Planned (WDA) |
 | iOS | [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) (`IOSDevice3`) | Yes | Yes (AFC + app sandbox) | Yes | Planned (WDA) |
-| iOS | ios4 (`IOSDevice4`) | Yes | — | Yes (`afc --documents`) | — |
+| iOS | ios4 (`IOSDevice4`) | Yes | — | Yes (`afc --documents`) | Yes (iwda2) |
 | Android | adb (`AndroidDevice`) | Yes | Yes | — | Yes (`AndroidUIAuto`) |
 | Windows | PowerShell (`WindowsDevice`) | Yes | — | Yes (local filesystem) | Planned |
 
@@ -211,7 +211,8 @@ Every platform implementation shares the same interface:
 - `push(local, remote, app_id=None, documents_only=False)` / `pull(remote, local, app_id=None, documents_only=True)` — host ↔ device file transfer
 - `ls(remote, app_id=None, recursive=False)` — list a remote directory on the device
 - `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox; `IOSDevice5.documents_rm` delegates recursive removal to the `ios4` AFC service because CoreDevice has no delete command
-- `tap(x, y, app_id=None)` — normalized touch input, implemented by `IOSDevice5` through iwda2
+- `tap(x, y, app_id=None)` — normalized touch input, implemented by `IOSDevice4` and `IOSDevice5` through iwda2
+- `start_moniter(duration=180)` / `stop_moniter()` — on-device performance monitor, implemented by `IOSDevice4` and `IOSDevice5` through iwda2
 - `screenshot(local)` — capture the screen to a host file
 - `host_is_running()` — whether WebDriverAgent / UIAutomator2 host process is up
 - `capture_memgraph(output, pid=None)` — capture a process memory snapshot (`IOSDevice4`, and `IOSDevice5` by shelling out to `ios4`)
@@ -246,6 +247,7 @@ Higher-level UI helpers built on top of device tooling. Currently only `AndroidU
 - Xcode-compatible snapshots via `memgraph`, defaulting to the last launch PID
 - Tracks the launch PID so `memgraph` can reuse it — `process_control` always reports one
 - Stop via `pkill --bundle`
+- Normalized screen taps and performance monitor via the shared iwda2 mixin (`tap`, `start_moniter`, `stop_moniter`)
 - Screen capture via `screenshot`
 - Documents sandbox via `afc --documents <bundle-id>`: `documents_exists`, `documents_ls`, `documents_push`, `documents_pull`, `documents_rm`, all handling files and directories (directories are walked client-side, since `afc upload`/`download` only move single files)
 - Documents paths are always relative to the vended `/Documents` root, so `remote` cannot escape the sandbox
@@ -258,7 +260,7 @@ CoreDevice CLI, so it needs macOS with Xcode but no third-party binary:
 - Exact bundle-id checks via `device info apps --bundle-id`
 - Launch via `device process launch`, with the environment as a JSON dictionary and `argv` as real positional arguments
 - Stop by resolving the bundle's processes in `device info processes` and terminating each with `device process terminate --kill`
-- Normalized screen taps through `iwda2` at `http://<device-ip>:18201/api/tap`; the explicit `app_id` or bound `package_name` anchors coordinates to the app's current orientation
+- Normalized screen taps and performance monitor through the same iwda2 mixin as `IOSDevice4` (`http://<device-ip>:18201/api/tap` and `/api/monitor`); the explicit `app_id` or bound `package_name` anchors tap coordinates to the app's current orientation
 - App data container transfers via `device copy to` / `device copy from` and listing via `device info files`, including the Documents sandbox; directory pushes can pass `remove_existing_content=True` to replace the destination contents
 - Screen capture via `device capture screenshot` on Xcode 27+, falling back to `ios4`
 - `capture_memgraph` shells out to `ios4`: CoreDevice exposes no memory-graph service

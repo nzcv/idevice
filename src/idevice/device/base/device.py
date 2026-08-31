@@ -552,12 +552,32 @@ class DeviceBase(ABC):
             f"launch_wda is not supported on {self.platform} devices"
         )
 
-    def start_moniter(self):
+    def start_moniter(self, duration: int = 180) -> bool:
+        """Start on-device performance monitoring.
+
+        Args:
+            duration: Seconds the monitor should run.
+
+        Returns:
+            bool: Whether the monitor accepted the start request.
+
+        Raises:
+            NotImplementedError: When the platform cannot start a monitor.
+        """
+        del duration
         raise NotImplementedError(
             f"start_moniter is not supported on {self.platform} devices"
         )
 
-    def stop_moniter(self):
+    def stop_moniter(self) -> bool:
+        """Stop on-device performance monitoring.
+
+        Returns:
+            bool: Whether the monitor accepted the stop request.
+
+        Raises:
+            NotImplementedError: When the platform cannot stop a monitor.
+        """
         raise NotImplementedError(
             f"stop_moniter is not supported on {self.platform} devices"
         )

@@ -6,16 +6,19 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from idevice.device.base.errors import AppNotInstalledError, DeviceNotFoundError
 from idevice.device.base.runner import CommandResult
 from idevice.device.common.ios4cli import IOS4CLI
+from idevice.device.common.iwda2 import IWDA2Error, IWDA2Mixin
 from idevice.device.ios4.device import IOSDevice4, IOSDevice4Error
 
 APP_ID = "com.example.game"
 BINARY = "/opt/ios4"
 IDEVICEINSTALLER = "/opt/bin/ideviceinstaller"
 UDID = "00000000-0000000000000000"
+DEVICE_IP = "192.0.2.10"
 
 
 @pytest.fixture
@@ -384,9 +387,176 @@ def test_screenshot_uses_the_ios4_screenshot_service(
     assert output.read_bytes() == b"\x89PNG"
 
 
-def test_tap_is_not_supported(ios4_device: IOSDevice4) -> None:
-    with pytest.raises(NotImplementedError, match="tap is not supported"):
-        ios4_device.tap(0.5, 0.5)
+def test_ios4_reuses_shared_iwda2_methods() -> None:
+    assert IOSDevice4.tap is IWDA2Mixin.tap
+    assert IOSDevice4.start_moniter is IWDA2Mixin.start_moniter
+    assert IOSDevice4.stop_moniter is IWDA2Mixin.stop_moniter
+
+
+def test_tap_calls_iwda2_with_normalized_coordinates_and_bundle_id(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._device_ip = DEVICE_IP
+    response = MagicMock(status_code=200)
+
+    with patch(
+        "idevice.device.common.iwda2.requests.get", return_value=response
+    ) as get:
+        ios4_device.tap(0.25, 0.75, app_id="com.example.foreground")
+
+    get.assert_called_once_with(
+        f"http://{DEVICE_IP}:18201/api/tap",
+        params={
+            "x": 0.25,
+            "y": 0.75,
+            "bundleId": "com.example.foreground",
+        },
+        timeout=30.0,
+    )
+
+
+def test_tap_uses_the_bound_package_name_as_the_iwda2_anchor(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._device_ip = DEVICE_IP
+    response = MagicMock(status_code=200)
+
+    with patch(
+        "idevice.device.common.iwda2.requests.get", return_value=response
+    ) as get:
+        ios4_device.tap(0, 1)
+
+    assert get.call_args.kwargs["params"] == {
+        "x": 0.0,
+        "y": 1.0,
+        "bundleId": APP_ID,
+    }
+
+
+@pytest.mark.parametrize(
+    ("x", "y", "coordinate"),
+    [
+        (-0.1, 0.5, "x"),
+        (1.1, 0.5, "x"),
+        (0.5, -0.1, "y"),
+        (0.5, 1.1, "y"),
+        (True, 0.5, "x"),
+        (float("nan"), 0.5, "x"),
+        (0.5, float("inf"), "y"),
+    ],
+)
+def test_tap_rejects_invalid_normalized_coordinates(
+    ios4_device: IOSDevice4,
+    x: float,
+    y: float,
+    coordinate: str,
+) -> None:
+    ios4_device._device_ip = DEVICE_IP
+    with patch("idevice.device.common.iwda2.requests.get") as get:
+        with pytest.raises(
+            ValueError, match=rf"{coordinate} must be a normalized coordinate"
+        ):
+            ios4_device.tap(x, y)
+
+    get.assert_not_called()
+
+
+def test_tap_raises_when_iwda2_is_unreachable(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._device_ip = DEVICE_IP
+    with patch(
+        "idevice.device.common.iwda2.requests.get",
+        side_effect=requests.ConnectionError("refused"),
+    ):
+        with pytest.raises(IWDA2Error, match="tap request failed"):
+            ios4_device.tap(0.5, 0.5)
+
+
+def test_tap_raises_when_iwda2_rejects_the_request(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._device_ip = DEVICE_IP
+    response = MagicMock(
+        status_code=500,
+        text='{"status":"error","reason":"application is not running"}',
+    )
+
+    with patch(
+        "idevice.device.common.iwda2.requests.get", return_value=response
+    ):
+        with pytest.raises(IWDA2Error, match="HTTP 500"):
+            ios4_device.tap(0.5, 0.5)
+
+
+def test_tap_raises_without_device_ip(ios4_device: IOSDevice4) -> None:
+    with patch("idevice.device.common.iwda2.requests.get") as get:
+        with pytest.raises(IWDA2Error, match="device_ip is empty"):
+            ios4_device.tap(0.5, 0.5)
+
+    get.assert_not_called()
+
+
+def test_start_moniter_calls_iwda2_with_duration(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._device_ip = DEVICE_IP
+    response = MagicMock(status_code=200)
+
+    with patch(
+        "idevice.device.common.iwda2.requests.get", return_value=response
+    ) as get:
+        assert ios4_device.start_moniter(duration=90) is True
+
+    get.assert_called_once_with(
+        f"http://{DEVICE_IP}:18201/api/monitor/start",
+        params={"duration": "90"},
+        timeout=30.0,
+    )
+
+
+def test_stop_moniter_calls_iwda2(ios4_device: IOSDevice4) -> None:
+    ios4_device._device_ip = DEVICE_IP
+    response = MagicMock(status_code=200)
+
+    with patch(
+        "idevice.device.common.iwda2.requests.get", return_value=response
+    ) as get:
+        assert ios4_device.stop_moniter() is True
+
+    get.assert_called_once_with(
+        f"http://{DEVICE_IP}:18201/api/monitor/stop",
+        params=None,
+        timeout=30.0,
+    )
+
+
+@pytest.mark.parametrize("duration", [0, -1, float("inf"), float("nan"), True])
+def test_start_moniter_rejects_invalid_duration(
+    ios4_device: IOSDevice4, duration: float
+) -> None:
+    with pytest.raises(ValueError, match="positive finite number"):
+        ios4_device.start_moniter(duration)
+
+
+def test_moniter_returns_false_when_iwda2_is_unreachable(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._device_ip = DEVICE_IP
+    with patch(
+        "idevice.device.common.iwda2.requests.get",
+        side_effect=requests.ConnectionError("refused"),
+    ):
+        assert ios4_device.start_moniter() is False
+
+
+def test_moniter_returns_false_without_device_ip(
+    ios4_device: IOSDevice4,
+) -> None:
+    with patch("idevice.device.common.iwda2.requests.get") as get:
+        assert ios4_device.stop_moniter() is False
+
+    get.assert_not_called()
 
 
 def test_host_is_running_is_always_false(ios4_device: IOSDevice4) -> None:

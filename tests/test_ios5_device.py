@@ -18,6 +18,7 @@ from idevice.device.base.errors import (
 )
 from idevice.device.base.runner import CommandResult
 from idevice.device.common.ios4cli import IOS4CLI
+from idevice.device.common.iwda2 import IWDA2Error, IWDA2Mixin
 from idevice.device.common.xcruncli import DevicectlOutcome, XcrunCLI
 from idevice.device.ios5.device import IOSDevice5, IOSDevice5Error
 
@@ -600,13 +601,19 @@ def test_host_is_running_detects_the_runner_executable(
     assert ios5_device.host_is_running() is True
 
 
+def test_ios5_reuses_shared_iwda2_methods() -> None:
+    assert IOSDevice5.tap is IWDA2Mixin.tap
+    assert IOSDevice5.start_moniter is IWDA2Mixin.start_moniter
+    assert IOSDevice5.stop_moniter is IWDA2Mixin.stop_moniter
+
+
 def test_start_moniter_calls_iwda2_with_duration(
     ios5_device: IOSDevice5,
 ) -> None:
     response = MagicMock(status_code=200)
 
     with patch(
-        "idevice.device.ios5.device.requests.get", return_value=response
+        "idevice.device.common.iwda2.requests.get", return_value=response
     ) as get:
         assert ios5_device.start_moniter(duration=90) is True
 
@@ -621,7 +628,7 @@ def test_stop_moniter_calls_iwda2(ios5_device: IOSDevice5) -> None:
     response = MagicMock(status_code=200)
 
     with patch(
-        "idevice.device.ios5.device.requests.get", return_value=response
+        "idevice.device.common.iwda2.requests.get", return_value=response
     ) as get:
         assert ios5_device.stop_moniter() is True
 
@@ -644,7 +651,7 @@ def test_moniter_returns_false_when_iwda2_is_unreachable(
     ios5_device: IOSDevice5,
 ) -> None:
     with patch(
-        "idevice.device.ios5.device.requests.get",
+        "idevice.device.common.iwda2.requests.get",
         side_effect=requests.ConnectionError("refused"),
     ):
         assert ios5_device.start_moniter() is False
@@ -655,7 +662,7 @@ def test_moniter_returns_false_without_device_ip(
 ) -> None:
     ios5_device._device_ip = ""
 
-    with patch("idevice.device.ios5.device.requests.get") as get:
+    with patch("idevice.device.common.iwda2.requests.get") as get:
         assert ios5_device.stop_moniter() is False
 
     get.assert_not_called()
@@ -667,7 +674,7 @@ def test_moniter_returns_false_for_http_error(
     response = MagicMock(status_code=409, text="disabled")
 
     with patch(
-        "idevice.device.ios5.device.requests.get", return_value=response
+        "idevice.device.common.iwda2.requests.get", return_value=response
     ):
         assert ios5_device.start_moniter() is False
 
@@ -678,7 +685,7 @@ def test_tap_calls_iwda2_with_normalized_coordinates_and_bundle_id(
     response = MagicMock(status_code=200)
 
     with patch(
-        "idevice.device.ios5.device.requests.get", return_value=response
+        "idevice.device.common.iwda2.requests.get", return_value=response
     ) as get:
         ios5_device.tap(0.25, 0.75, app_id="com.example.foreground")
 
@@ -699,7 +706,7 @@ def test_tap_uses_the_bound_package_name_as_the_iwda2_anchor(
     response = MagicMock(status_code=200)
 
     with patch(
-        "idevice.device.ios5.device.requests.get", return_value=response
+        "idevice.device.common.iwda2.requests.get", return_value=response
     ) as get:
         ios5_device.tap(0, 1)
 
@@ -728,7 +735,7 @@ def test_tap_rejects_invalid_normalized_coordinates(
     y: float,
     coordinate: str,
 ) -> None:
-    with patch("idevice.device.ios5.device.requests.get") as get:
+    with patch("idevice.device.common.iwda2.requests.get") as get:
         with pytest.raises(
             ValueError, match=rf"{coordinate} must be a normalized coordinate"
         ):
@@ -741,10 +748,10 @@ def test_tap_raises_when_iwda2_is_unreachable(
     ios5_device: IOSDevice5,
 ) -> None:
     with patch(
-        "idevice.device.ios5.device.requests.get",
+        "idevice.device.common.iwda2.requests.get",
         side_effect=requests.ConnectionError("refused"),
     ):
-        with pytest.raises(IOSDevice5Error, match="tap request failed"):
+        with pytest.raises(IWDA2Error, match="tap request failed"):
             ios5_device.tap(0.5, 0.5)
 
 
@@ -757,17 +764,17 @@ def test_tap_raises_when_iwda2_rejects_the_request(
     )
 
     with patch(
-        "idevice.device.ios5.device.requests.get", return_value=response
+        "idevice.device.common.iwda2.requests.get", return_value=response
     ):
-        with pytest.raises(IOSDevice5Error, match="HTTP 500"):
+        with pytest.raises(IWDA2Error, match="HTTP 500"):
             ios5_device.tap(0.5, 0.5)
 
 
 def test_tap_raises_without_device_ip(ios5_device: IOSDevice5) -> None:
     ios5_device._device_ip = ""
 
-    with patch("idevice.device.ios5.device.requests.get") as get:
-        with pytest.raises(IOSDevice5Error, match="device_ip is empty"):
+    with patch("idevice.device.common.iwda2.requests.get") as get:
+        with pytest.raises(IWDA2Error, match="device_ip is empty"):
             ios5_device.tap(0.5, 0.5)
 
     get.assert_not_called()

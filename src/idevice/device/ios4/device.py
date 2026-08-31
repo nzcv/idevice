@@ -15,6 +15,7 @@ from idevice.device.base.errors import AppNotInstalledError
 from idevice.device.base.runner import CommandResult, SubprocessRunner
 from idevice.device.cache import InstalledAppCache, InstalledAppInfo
 from idevice.device.common.ios4cli import IOS4CLI
+from idevice.device.common.iwda2 import IWDA2Mixin
 from idevice.device.config import device_id as env_device_id
 from idevice.device.config import device_ip as env_device_ip
 from idevice.device.config import ideviceinstaller_binary, ios4_binary
@@ -40,7 +41,7 @@ class IOSDevice4Error(RuntimeError):
     """Raised when an ``ios4`` device operation fails."""
 
 
-class IOSDevice4(DeviceBase):
+class IOSDevice4(IWDA2Mixin, DeviceBase):
     """Install and launch iOS games through ``ios4``.
 
     IPA installation prefers the standalone libimobiledevice
@@ -55,6 +56,8 @@ class IOSDevice4(DeviceBase):
     * ``pkill --bundle`` to stop a running app.
     * ``app_service uninstall`` for lifecycle cleanup.
     * ``afc --documents`` for the app Documents sandbox (``documents_*``).
+    * iwda2 ``/api/tap`` and ``/api/monitor`` for :meth:`tap`,
+      :meth:`start_moniter`, and :meth:`stop_moniter`.
 
     Generic file transfer (``push`` / ``pull`` / ``ls``) outside the Documents
     sandbox is intentionally not implemented because the ios4 backend

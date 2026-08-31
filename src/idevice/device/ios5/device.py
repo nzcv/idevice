@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import logging
-import math
 import sys
 from pathlib import Path
-
-import requests
 
 from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.base.errors import CommandExecutionError, DeviceNotFoundError
 from idevice.device.base.runner import SubprocessRunner
 from idevice.device.cache import InstalledAppCache, InstalledAppInfo
 from idevice.device.common.ios4cli import IOS4CLI, IOS4CLIError
+from idevice.device.common.iwda2 import IWDA2Mixin
 from idevice.device.common.xcruncli import (
     DevicectlOutcome,
     IOSDevice5Error,
@@ -27,13 +25,10 @@ from idevice.device.config import package_name as env_package_name
 logger = logging.getLogger(__name__)
 
 _LOG_TAG = "[IOSDevice5]"
-_IWDA2_PORT = 18201
-_IWDA2_HTTP_TIMEOUT = 30.0
-_IWDA2_DEFAULT_MONITOR_DURATION = 180
 _DEVICETCL_FAILURES = (IOSDevice5Error, CommandExecutionError)
 
 
-class IOSDevice5(DeviceBase):
+class IOSDevice5(IWDA2Mixin, DeviceBase):
     """Route iOS operations through devicectl first and ios4 second.
 
     Operations implemented by CoreDevice always try :class:`XcrunCLI` first.
@@ -412,73 +407,6 @@ class IOSDevice5(DeviceBase):
 
     def delete2(self, data_path: AppDataPath, remote: str) -> bool:
         return self._ios4cli.delete2(data_path, remote)
-
-    @staticmethod
-    def _validate_normalized_coordinate(value: float, name: str) -> None:
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"{name} must be a normalized coordinate in [0, 1]")
-        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
-            raise ValueError(f"{name} must be a normalized coordinate in [0, 1]")
-
-    def tap(self, x: float, y: float, *, app_id: str | None = None) -> None:
-        """Tap via iwda2; CoreDevice has no touch-injection service."""
-        self._validate_normalized_coordinate(x, "x")
-        self._validate_normalized_coordinate(y, "y")
-        device_ip = self.device_ip.strip()
-        if not device_ip:
-            raise IOSDevice5Error(f"{_LOG_TAG} Cannot tap through iwda2: device_ip is empty")
-        target = (app_id or self.package_name).strip()
-        params: dict[str, float | str] = {"x": float(x), "y": float(y)}
-        if target:
-            params["bundleId"] = target
-        url = f"http://{device_ip}:{_IWDA2_PORT}/api/tap"
-        try:
-            response = requests.get(url, params=params, timeout=_IWDA2_HTTP_TIMEOUT)
-        except requests.RequestException as exc:
-            raise IOSDevice5Error(
-                f"{_LOG_TAG} iwda2 tap request failed: GET {url}: {exc}"
-            ) from exc
-        if response.status_code != 200:
-            raise IOSDevice5Error(
-                f"{_LOG_TAG} iwda2 tap failed: GET {url} returned HTTP "
-                f"{response.status_code}: {response.text!r}"
-            )
-
-    def start_moniter(self, duration: int = _IWDA2_DEFAULT_MONITOR_DURATION) -> bool:
-        if (
-            isinstance(duration, bool)
-            or not isinstance(duration, (int, float))
-            or not math.isfinite(duration)
-            or duration <= 0
-        ):
-            raise ValueError("duration must be a positive finite number")
-        return self._request_iwda2_monitor(
-            "/api/monitor/start", params={"duration": format(float(duration), "g")}
-        )
-
-    def stop_moniter(self) -> bool:
-        return self._request_iwda2_monitor("/api/monitor/stop")
-
-    def _request_iwda2_monitor(
-        self, route: str, *, params: dict[str, str] | None = None
-    ) -> bool:
-        device_ip = self.device_ip.strip()
-        if not device_ip:
-            logger.warning(f"{_LOG_TAG} Cannot call iwda2 {route}: device_ip is empty")
-            return False
-        url = f"http://{device_ip}:{_IWDA2_PORT}{route}"
-        try:
-            response = requests.get(url, params=params, timeout=_IWDA2_HTTP_TIMEOUT)
-        except requests.RequestException as exc:
-            logger.warning(f"{_LOG_TAG} iwda2 request failed: GET {url}: {exc}")
-            return False
-        if response.status_code != 200:
-            logger.warning(
-                f"{_LOG_TAG} GET {url} returned HTTP {response.status_code}: "
-                f"{response.text!r}"
-            )
-            return False
-        return True
 
 
 __all__ = ["DevicectlOutcome", "IOSDevice5", "IOSDevice5Error"]
