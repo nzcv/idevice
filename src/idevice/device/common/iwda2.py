@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Optional
 
 import requests
 
@@ -31,7 +30,7 @@ def request(
     device_ip: str,
     route: str,
     *,
-    params: Optional[dict[str, str]] = None,
+    params: dict[str, str] | None = None,
     log_tag: str = "[IWDA2]",
 ) -> bool:
     """GET an iwda2 route and return whether it answered HTTP 200.
@@ -171,7 +170,7 @@ class IWDA2Mixin:
         """Return the log prefix for this device class."""
         return f"[{type(self).__name__}]"
 
-    def tap(self, x: float, y: float, *, app_id: Optional[str] = None) -> None:
+    def tap(self, x: float, y: float, *, app_id: str | None = None) -> None:
         """Tap a normalized screen point through iwda2."""
         target = (app_id or self.package_name).strip()
         send_tap(
