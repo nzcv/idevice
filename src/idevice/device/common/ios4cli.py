@@ -48,8 +48,7 @@ class IOS4CLI:
     """Low-level ios4 CLI implementation shared by IOSDevice4 and IOSDevice5.
 
     This class owns only CLI concerns: command construction, subprocess
-    execution, output parsing, and ios4-backed state. Device policies such as
-    WebDriverAgent-first launching live in the device classes that compose it.
+    execution, output parsing, and ios4-backed state.
     """
 
     def __init__(
@@ -219,7 +218,7 @@ class IOS4CLI:
         self.last_launch_app_id = app_id
 
     def launch(self, app_id: str) -> None:
-        """Launch an app without WDA or launch arguments."""
+        """Launch an app without launch arguments."""
         self.run("process_control", app_id)
 
     def stop_app(self, app_id: str) -> None:

@@ -13,7 +13,7 @@ The package ships two complementary APIs:
 |----------|---------|---------------|---------------|-------------------|---------------|
 | iOS | [go-ios](https://github.com/danielpaulus/go-ios) (`IOSDevice`) | Yes | Yes | — | Planned (WDA) |
 | iOS | [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) (`IOSDevice3`) | Yes | Yes (AFC + app sandbox) | Yes | Planned (WDA) |
-| iOS | ios4 (`IOSDevice4`) | Yes | — | Yes (`afc --documents`) | Yes (WDA) |
+| iOS | ios4 (`IOSDevice4`) | Yes | — | Yes (`afc --documents`) | — |
 | Android | adb (`AndroidDevice`) | Yes | Yes | — | Yes (`AndroidUIAuto`) |
 | Windows | PowerShell (`WindowsDevice`) | Yes | — | Yes (local filesystem) | Planned |
 
@@ -211,7 +211,7 @@ Every platform implementation shares the same interface:
 - `push(local, remote, app_id=None, documents_only=False)` / `pull(remote, local, app_id=None, documents_only=True)` — host ↔ device file transfer
 - `ls(remote, app_id=None, recursive=False)` — list a remote directory on the device
 - `documents_exists(app_id, remote)` / `documents_ls(app_id, remote)` / `documents_push(app_id, local, remote)` / `documents_pull(app_id, remote, local)` / `documents_rm(app_id, remote)` — app Documents sandbox; `IOSDevice5.documents_rm` delegates recursive removal to the `ios4` AFC service because CoreDevice has no delete command
-- `tap(x, y, app_id=None)` — normalized touch input, implemented by `IOSDevice4` through WebDriverAgent and `IOSDevice5` through iwda2
+- `tap(x, y, app_id=None)` — normalized touch input, implemented by `IOSDevice5` through iwda2
 - `screenshot(local)` — capture the screen to a host file
 - `host_is_running()` — whether WebDriverAgent / UIAutomator2 host process is up
 - `capture_memgraph(output, pid=None)` — capture a process memory snapshot (`IOSDevice4`, and `IOSDevice5` by shelling out to `ios4`)
@@ -242,12 +242,10 @@ Higher-level UI helpers built on top of device tooling. Currently only `AndroidU
 
 - IPA/app-directory install via the standalone `ideviceinstaller` CLI when present, otherwise `ios4 ideviceinstaller install`
 - Exact bundle-id checks via `application_listing`
-- Direct native launch via `process_control`
-- Launch via WebDriverAgent first, falling back to `process_control`; both carry ordered `argv` and environment values
+- Launch via `process_control` with ordered `argv` and environment values
 - Xcode-compatible snapshots via `memgraph`, defaulting to the last launch PID
-- Tracks the launch PID so `memgraph` can reuse it — `process_control` always reports one, while a WDA launch resolves it best-effort from the WDA app list
-- Stop via WebDriverAgent first, falling back to `pkill --bundle`
-- Normalized screen taps via WebDriverAgent
+- Tracks the launch PID so `memgraph` can reuse it — `process_control` always reports one
+- Stop via `pkill --bundle`
 - Screen capture via `screenshot`
 - Documents sandbox via `afc --documents <bundle-id>`: `documents_exists`, `documents_ls`, `documents_push`, `documents_pull`, `documents_rm`, all handling files and directories (directories are walked client-side, since `afc upload`/`download` only move single files)
 - Documents paths are always relative to the vended `/Documents` root, so `remote` cannot escape the sandbox

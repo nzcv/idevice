@@ -13,7 +13,6 @@ dependencies = [
     "pymobiledevice3>=9.15.2",
     "requests>=2.32.5",
     "uiautomator2>=3.5.2",
-    "facebook-wda>=1.5.4",
 ]
 
 [project.optional-dependencies]

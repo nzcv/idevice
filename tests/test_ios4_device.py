@@ -132,98 +132,7 @@ Found 2 applications:
     )
 
 
-def test_launch_uses_wda_first_and_keeps_the_session_open(
-    ios4_device: IOSDevice4,
-) -> None:
-    ios4_device._runner.run.return_value = result(
-        stdout=f"  {APP_ID}  ExampleGame  1.0\n"
-    )
-    wda_session = MagicMock()
-    wda_session.app_list.return_value = [
-        {"pid": 52, "bundleId": "com.apple.springboard"},
-        {"pid": 4815, "bundleId": APP_ID},
-    ]
-    wda_client = MagicMock()
-    wda_client.session.return_value = wda_session
-
-    with patch(
-        "idevice.device.ios4.device.wda.Client", return_value=wda_client
-    ) as client:
-        ios4_device.launch_app(
-            APP_ID,
-            args=["--mode", "debug"],
-            environment={"MallocStackLogging": "1"},
-        )
-
-    client.assert_called_once_with(None)
-    wda_client.session.assert_called_once_with(
-        APP_ID,
-        arguments=["--mode", "debug"],
-        environment={"MallocStackLogging": "1"},
-    )
-    wda_session.close.assert_not_called()
-    wda_session.__exit__.assert_not_called()
-    assert ios4_device.last_launch_pid == 4815
-    assert ios4_device._last_launch_app_id == APP_ID
-    assert ios4_device._runner.run.call_count == 1
-    assert ios4_device._runner.run.call_args.args[0] == [
-        BINARY,
-        "--udid",
-        UDID,
-        "application_listing",
-    ]
-
-
-def test_launch_via_wda_leaves_pid_unset_when_wda_reports_none(
-    ios4_device: IOSDevice4,
-) -> None:
-    ios4_device._runner.run.return_value = result(
-        stdout=f"  {APP_ID}  ExampleGame  1.0\n"
-    )
-    wda_session = MagicMock()
-    wda_session.app_list.return_value = [
-        {"pid": 52, "bundleId": "com.apple.springboard"}
-    ]
-    wda_client = MagicMock()
-    wda_client.session.return_value = wda_session
-
-    with patch(
-        "idevice.device.ios4.device.wda.Client", return_value=wda_client
-    ):
-        ios4_device.launch_app(APP_ID)
-
-    wda_client.session.assert_called_once_with(
-        APP_ID, arguments=None, environment=None
-    )
-    assert ios4_device.last_launch_pid is None
-    assert ios4_device._last_launch_app_id == APP_ID
-    assert ios4_device._runner.run.call_count == 1
-
-
-def test_launch_addresses_wda_on_the_bound_device_ip(tmp_path: Path) -> None:
-    with patch("idevice.device.ios4.device.ios4_binary", return_value=BINARY):
-        with patch(
-            "idevice.device.ios4.device.shutil.which", return_value=BINARY
-        ):
-            device = IOSDevice4(
-                UDID,
-                device_ip="10.0.0.5",
-                package_name=APP_ID,
-                cache_dir=tmp_path / "cache",
-            )
-    device._runner = MagicMock()
-    device._runner.run.return_value = result(
-        stdout=f"  {APP_ID}  ExampleGame  1.0\n"
-    )
-
-    with patch("idevice.device.ios4.device.wda.Client") as client:
-        client.return_value.session.return_value.app_list.return_value = []
-        device.launch_app(APP_ID)
-
-    client.assert_called_once_with("http://10.0.0.5:8100")
-
-
-def test_launch_falls_back_to_process_control_when_wda_fails(
+def test_launch_uses_process_control(
     ios4_device: IOSDevice4,
 ) -> None:
     ios4_device._runner.run.side_effect = [
@@ -231,17 +140,14 @@ def test_launch_falls_back_to_process_control_when_wda_fails(
         result(stdout="PID: 4815\n"),
     ]
 
-    with patch(
-        "idevice.device.ios4.device.wda.Client",
-        side_effect=RuntimeError("wda unreachable"),
-    ):
-        ios4_device.launch_app(
-            APP_ID,
-            args=["--mode", "debug", "--label", "foo,bar", r"C:\tmp"],
-            environment={"MallocStackLogging": "1", "FOO": "bar=baz"},
-        )
+    ios4_device.launch_app(
+        APP_ID,
+        args=["--mode", "debug", "--label", "foo,bar", r"C:\tmp"],
+        environment={"MallocStackLogging": "1", "FOO": "bar=baz"},
+    )
 
     assert ios4_device.last_launch_pid == 4815
+    assert ios4_device._last_launch_app_id == APP_ID
     assert ios4_device._runner.run.call_args_list[0].args[0] == [
         BINARY,
         "--udid",
@@ -269,11 +175,7 @@ def test_launch_without_app_id_uses_bound_package_name(
         result(stdout="PID: 4815\n"),
     ]
 
-    with patch(
-        "idevice.device.ios4.device.wda.Client",
-        side_effect=RuntimeError("wda unreachable"),
-    ):
-        ios4_device.launch_app()
+    ios4_device.launch_app()
 
     assert ios4_device.last_launch_pid == 4815
     assert ios4_device._runner.run.call_args_list[1].args[0][-1] == APP_ID
@@ -290,12 +192,10 @@ def test_launch_without_app_id_or_package_name_raises(
             device = IOSDevice4(UDID, cache_dir=tmp_path / "cache")
     device._runner = MagicMock()
 
-    with patch("idevice.device.ios4.device.wda.Client") as client:
-        with pytest.raises(ValueError, match="app_id is required"):
-            device.launch_app()
+    with pytest.raises(ValueError, match="app_id is required"):
+        device.launch_app()
 
     device._runner.run.assert_not_called()
-    client.assert_not_called()
 
 
 def test_launch_rejects_uninstalled_app(ios4_device: IOSDevice4) -> None:
@@ -303,26 +203,29 @@ def test_launch_rejects_uninstalled_app(ios4_device: IOSDevice4) -> None:
         stdout="Found 0 applications:\n"
     )
 
-    with patch("idevice.device.ios4.device.wda.Client") as client:
-        with pytest.raises(AppNotInstalledError, match="App not installed"):
-            ios4_device.launch_app(APP_ID)
+    with pytest.raises(AppNotInstalledError, match="App not installed"):
+        ios4_device.launch_app(APP_ID)
 
     assert ios4_device._runner.run.call_count == 1
-    client.assert_not_called()
 
 
-def test_launch_validates_encoding_before_reaching_wda(
+def test_launch_validates_encoding_before_process_control(
     ios4_device: IOSDevice4,
 ) -> None:
     ios4_device._runner.run.return_value = result(
         stdout=f"  {APP_ID}  ExampleGame  1.0\n"
     )
 
-    with patch("idevice.device.ios4.device.wda.Client") as client:
-        with pytest.raises(ValueError, match="cannot be empty"):
-            ios4_device.launch_app(APP_ID, args=["--mode", ""])
+    with pytest.raises(ValueError, match="cannot be empty"):
+        ios4_device.launch_app(APP_ID, args=["--mode", ""])
 
-    client.assert_not_called()
+    assert ios4_device._runner.run.call_count == 1
+    assert ios4_device._runner.run.call_args.args[0] == [
+        BINARY,
+        "--udid",
+        UDID,
+        "application_listing",
+    ]
 
 
 def test_launch_requires_pid_in_process_control_output(
@@ -333,12 +236,8 @@ def test_launch_requires_pid_in_process_control_output(
         result(stdout="launch completed without pid\n"),
     ]
 
-    with patch(
-        "idevice.device.ios4.device.wda.Client",
-        side_effect=RuntimeError("wda unreachable"),
-    ):
-        with pytest.raises(IOSDevice4Error, match="did not return a PID"):
-            ios4_device.launch_app(APP_ID)
+    with pytest.raises(IOSDevice4Error, match="did not return a PID"):
+        ios4_device.launch_app(APP_ID)
 
 
 def test_native_launch_uses_process_control(
@@ -424,72 +323,20 @@ def test_capture_memgraph_failure_preserves_existing_output(
     assert output.read_bytes() == b"previous"
 
 
-def test_stop_uses_wda_first_and_clears_the_tracked_pid(
+def test_stop_uses_pkill_and_clears_the_tracked_pid(
     ios4_device: IOSDevice4,
 ) -> None:
     ios4_device._last_launch_pid = 4815
     ios4_device._last_launch_app_id = APP_ID
-    wda_client = MagicMock()
-
-    with patch(
-        "idevice.device.ios4.device.wda.Client", return_value=wda_client
-    ) as client:
-        ios4_device.stop_app()
-
-    client.assert_called_once_with(None)
-    wda_client.app_terminate.assert_called_once_with(APP_ID)
-    # Opening a session displaces the app under test and closing one
-    # terminates it, so neither may happen around an app operation.
-    wda_client.session.assert_not_called()
-    wda_client.close.assert_not_called()
-    ios4_device._runner.run.assert_not_called()
-    assert ios4_device.last_launch_pid is None
-
-
-def test_stop_falls_back_to_ios4_when_wda_fails(
-    ios4_device: IOSDevice4,
-) -> None:
-    ios4_device._device_ip = "192.0.2.10"
-    ios4_device._last_launch_pid = 4815
-    ios4_device._last_launch_app_id = APP_ID
     ios4_device._runner.run.return_value = result(stdout="Killed 4815 (Game)\n")
 
-    with patch(
-        "idevice.device.ios4.device.wda.Client",
-        side_effect=RuntimeError("WDA unavailable"),
-    ) as client:
-        ios4_device.stop_app()
+    ios4_device.stop_app()
 
-    client.assert_called_once_with("http://192.0.2.10:8100")
-    ios4_device._runner.run.assert_called_once_with(
-        [
-            BINARY,
-            "--udid",
-            UDID,
-            "pkill",
-            "--bundle",
-            APP_ID,
-        ],
-        check=False,
-    )
-    assert ios4_device.last_launch_pid is None
-
-
-def test_stop_falls_back_to_pkill_when_wda_termination_fails(
-    ios4_device: IOSDevice4,
-) -> None:
-    wda_client = MagicMock()
-    wda_client.app_terminate.side_effect = RuntimeError("termination failed")
-    ios4_device._runner.run.return_value = result(stdout="Killed 4815 (Game)\n")
-
-    with patch("idevice.device.ios4.device.wda.Client", return_value=wda_client):
-        ios4_device.stop_app()
-
-    wda_client.close.assert_not_called()
     ios4_device._runner.run.assert_called_once_with(
         [BINARY, "--udid", UDID, "pkill", "--bundle", APP_ID],
         check=False,
     )
+    assert ios4_device.last_launch_pid is None
 
 
 def test_stop_keeps_the_tracked_pid_of_another_app(
@@ -497,12 +344,14 @@ def test_stop_keeps_the_tracked_pid_of_another_app(
 ) -> None:
     ios4_device._last_launch_pid = 4815
     ios4_device._last_launch_app_id = APP_ID
-    wda_client = MagicMock()
+    ios4_device._runner.run.return_value = result(stdout="Killed 99 (Other)\n")
 
-    with patch("idevice.device.ios4.device.wda.Client", return_value=wda_client):
-        ios4_device.stop_app("com.example.other")
+    ios4_device.stop_app("com.example.other")
 
-    wda_client.app_terminate.assert_called_once_with("com.example.other")
+    ios4_device._runner.run.assert_called_once_with(
+        [BINARY, "--udid", UDID, "pkill", "--bundle", "com.example.other"],
+        check=False,
+    )
     assert ios4_device.last_launch_pid == 4815
 
 
@@ -511,12 +360,8 @@ def test_stop_raises_when_pkill_fails(ios4_device: IOSDevice4) -> None:
         returncode=1, stderr="No installed application with bundle ID\n"
     )
 
-    with patch(
-        "idevice.device.ios4.device.wda.Client",
-        side_effect=RuntimeError("WDA unavailable"),
-    ):
-        with pytest.raises(IOSDevice4Error, match="Failed to stop"):
-            ios4_device.stop_app()
+    with pytest.raises(IOSDevice4Error, match="Failed to stop"):
+        ios4_device.stop_app()
 
 
 def test_screenshot_uses_the_ios4_screenshot_service(
@@ -539,244 +384,14 @@ def test_screenshot_uses_the_ios4_screenshot_service(
     assert output.read_bytes() == b"\x89PNG"
 
 
-def test_tap_uses_wda_normalized_coordinates_on_the_live_session(
-    ios4_device: IOSDevice4,
-) -> None:
-    ios4_device._device_ip = "192.0.2.10"
-    wda_client = MagicMock()
+def test_tap_is_not_supported(ios4_device: IOSDevice4) -> None:
+    with pytest.raises(NotImplementedError, match="tap is not supported"):
+        ios4_device.tap(0.5, 0.5)
 
-    with patch(
-        "idevice.device.ios4.device.wda.Client", return_value=wda_client
-    ) as client:
-        ios4_device.tap(0, 1, app_id=APP_ID)
 
-    client.assert_called_once_with("http://192.0.2.10:8100")
-    wda_client.click.assert_called_once_with(0.0, 1.0)
-    # A tap that opened and closed its own session would kill the app it
-    # was tapping on.
-    wda_client.session.assert_not_called()
-    wda_client.close.assert_not_called()
+def test_host_is_running_is_always_false(ios4_device: IOSDevice4) -> None:
+    assert ios4_device.host_is_running() is False
     ios4_device._runner.run.assert_not_called()
-
-
-@pytest.mark.parametrize(
-    ("x", "y", "coordinate"),
-    [
-        (-0.1, 0.5, "x"),
-        (1.1, 0.5, "x"),
-        (0.5, -0.1, "y"),
-        (0.5, 1.1, "y"),
-        (True, 0.5, "x"),
-    ],
-)
-def test_tap_rejects_invalid_normalized_coordinates(
-    ios4_device: IOSDevice4,
-    x: float,
-    y: float,
-    coordinate: str,
-) -> None:
-    with patch("idevice.device.ios4.device.wda.Client") as client:
-        with pytest.raises(
-            ValueError, match=rf"{coordinate} must be a normalized coordinate"
-        ):
-            ios4_device.tap(x, y)
-
-    client.assert_not_called()
-
-
-def test_tap_wraps_wda_failure(
-    ios4_device: IOSDevice4,
-) -> None:
-    wda_client = MagicMock()
-    wda_client.click.side_effect = RuntimeError("tap failed")
-
-    with patch("idevice.device.ios4.device.wda.Client", return_value=wda_client):
-        with pytest.raises(IOSDevice4Error, match="WDA failed to tap"):
-            ios4_device.tap(0.5, 0.25)
-
-    wda_client.close.assert_not_called()
-
-
-def test_dismiss_message_popup_clicks_known_button_when_alert_is_present(
-    ios4_device: IOSDevice4,
-) -> None:
-    wda_client = MagicMock()
-    wda_alert = MagicMock()
-    wda_alert.exists = True
-    wda_client.alert = wda_alert
-
-    allow_button = MagicMock()
-    allow_button.exists = True
-    close_button = MagicMock()
-    close_button.exists = False
-
-    def selector(**kwargs: object) -> MagicMock:
-        if kwargs.get("text") == "Allow":
-            return allow_button
-        if kwargs.get("text") == "取消":
-            return close_button
-        return MagicMock()
-
-    wda_client.side_effect = selector
-
-    with patch(
-        "idevice.device.ios4.device.wda.Client", return_value=wda_client
-    ) as client:
-        assert ios4_device.dismiss_message_popup(
-            button_labels=["Allow", "取消"], timeout=0.1
-        ) is True
-
-    client.assert_called_once_with(None)
-    wda_client.session.assert_not_called()
-    wda_client.close.assert_not_called()
-    allow_button.click.assert_called_once_with()
-    close_button.click.assert_not_called()
-
-
-def test_dismiss_message_popup_clicks_network_button_by_default_labels(
-    ios4_device: IOSDevice4,
-) -> None:
-    wda_client = MagicMock()
-    wda_alert = MagicMock()
-    wda_alert.exists = True
-    wda_client.alert = wda_alert
-
-    network_button = MagicMock()
-    network_button.exists = True
-    allow_button = MagicMock()
-    allow_button.exists = True
-    other_button = MagicMock()
-    other_button.exists = False
-
-    def any_button(**_: object) -> MagicMock:
-        return other_button
-
-    def selector(**kwargs: object) -> MagicMock:
-        if kwargs.get("text") == "Allow Access to Local Network":
-            return network_button
-        if kwargs.get("text") == "允许":
-            return allow_button
-        return any_button(**kwargs)
-
-    wda_client.side_effect = selector
-
-    with patch(
-        "idevice.device.ios4.device.wda.Client", return_value=wda_client
-    ) as client:
-        assert ios4_device.dismiss_message_popup(timeout=0.1) is True
-
-    client.assert_called_once_with(None)
-    wda_client.session.assert_not_called()
-    wda_client.close.assert_not_called()
-    network_button.click.assert_called_once_with()
-    allow_button.click.assert_not_called()
-
-
-def test_dismiss_message_popup_returns_false_when_alert_not_present(
-    ios4_device: IOSDevice4,
-) -> None:
-    wda_client = MagicMock()
-    wda_alert = MagicMock()
-    wda_alert.exists = False
-    wda_client.alert = wda_alert
-
-    with patch(
-        "idevice.device.ios4.device.wda.Client", return_value=wda_client
-    ) as client:
-        assert ios4_device.dismiss_message_popup(button_labels=["OK"]) is False
-
-    client.assert_called_once_with(None)
-    wda_client.session.assert_not_called()
-    wda_client.close.assert_not_called()
-
-
-def test_dismiss_message_popup_raises_on_wda_error(
-    ios4_device: IOSDevice4,
-) -> None:
-    with patch(
-        "idevice.device.ios4.device.wda.Client",
-        side_effect=RuntimeError("wda unreachable"),
-    ) as client:
-        with pytest.raises(IOSDevice4Error, match="failed to handle message popup"):
-            ios4_device.dismiss_message_popup(button_labels=["OK"])
-
-    client.assert_called_once_with(None)
-
-
-def test_dismiss_message_popup_rejects_empty_labels() -> None:
-    with pytest.raises(ValueError, match="at least one button label is required"):
-        IOSDevice4._normalize_message_popup_labels(())
-
-
-def test_dismiss_message_popup_with_duration_starts_background_thread(
-    ios4_device: IOSDevice4,
-) -> None:
-    thread = MagicMock()
-
-    with patch(
-        "idevice.device.ios4.device.threading.Thread", return_value=thread
-    ) as thread_factory:
-        assert ios4_device.dismiss_message_popup(
-            button_labels=["OK"], duration=5.0, interval=0.5, timeout=0.3
-        ) is True
-
-    thread_factory.assert_called_once_with(
-        target=ios4_device._watch_message_popups,
-        args=(("OK",), 0.3, 5.0, 0.5),
-        daemon=True,
-    )
-    thread.start.assert_called_once_with()
-
-
-def test_dismiss_message_popup_with_duration_rejects_non_positive_values(
-    ios4_device: IOSDevice4,
-) -> None:
-    with pytest.raises(ValueError, match="duration must be a positive number"):
-        ios4_device.dismiss_message_popup(duration=0)
-
-    with pytest.raises(ValueError, match="interval must be a positive number"):
-        ios4_device.dismiss_message_popup(duration=5.0, interval=0)
-
-    with pytest.raises(ValueError, match="timeout must be a positive number"):
-        ios4_device.dismiss_message_popup(duration=5.0, timeout=0)
-
-
-def test_watch_message_popups_dismisses_until_duration_elapses(
-    ios4_device: IOSDevice4,
-) -> None:
-    wda_client = MagicMock()
-    wda_alert = MagicMock()
-    wda_alert.exists = True
-    wda_client.alert = wda_alert
-
-    ok_button = MagicMock()
-    ok_button.exists = True
-    wda_client.side_effect = lambda **_: ok_button
-
-    clock = iter([0.0, 0.5, 1.5])
-    with patch(
-        "idevice.device.ios4.device.wda.Client", return_value=wda_client
-    ), patch("idevice.device.ios4.device.time.monotonic", side_effect=clock), patch(
-        "idevice.device.ios4.device.time.sleep"
-    ) as sleep:
-        ios4_device._watch_message_popups(("OK",), 0.1, duration=1.0, interval=0.5)
-
-    assert ok_button.click.call_count == 2
-    sleep.assert_called_once_with(0.5)
-    # The watch ran twice without ever creating or deleting a session: doing
-    # so on each scan is what used to terminate the app under test.
-    wda_client.session.assert_not_called()
-    wda_client.close.assert_not_called()
-
-
-def test_watch_message_popups_logs_and_returns_when_session_fails(
-    ios4_device: IOSDevice4,
-) -> None:
-    with patch(
-        "idevice.device.ios4.device.wda.Client",
-        side_effect=RuntimeError("wda unreachable"),
-    ):
-        ios4_device._watch_message_popups(("OK",), 0.1, duration=1.0, interval=0.5)
 
 
 def test_argument_and_environment_validation() -> None:
