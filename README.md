@@ -206,7 +206,7 @@ Every platform implementation shares the same interface:
 - `install(package_path, app_id=None)` — install `.ipa` / `.apk` and optionally record bundle id → file name
 - `uninstall(app_id)` / `is_installed(app_id)` / `get_installed_pkg_name(app_id)` — the latter returns an `InstalledAppInfo(app_id, version, path)` or `None`
 - `launch_app(app_id=None)` / `stop_app(app_id=None)` — both use the bound `package_name` when `app_id` is omitted
-- `launch(app_id=None)` — optional native device-service launch, currently implemented only by `IOSDevice4`
+- `launch(app_id=None)` — optional native device-service launch, implemented by `IOSDevice3`, `IOSDevice4`, and `IOSDevice5`
 - `package_name` — default app id set at `Device.create` / `Device.from_env` (`GAUTO_PACKAGE_NAME`)
 - `push(local, remote, app_id=None, documents_only=False)` / `pull(remote, local, app_id=None, documents_only=True)` — host ↔ device file transfer
 - `ls(remote, app_id=None, recursive=False)` — list a remote directory on the device

@@ -170,14 +170,34 @@ class IOSDevice3(IWDA2Mixin, DeviceBase):
             )
         return False
 
+    def launch(self, app_id: str | None = None) -> None:
+        """Launch an app through ``developer dvt launch``.
+
+        Unlike :meth:`launch_app`, this does not check whether the bundle is
+        installed first.
+
+        Args:
+            app_id: Bundle identifier to launch. When omitted or empty, uses
+                the bound :attr:`package_name`.
+
+        Raises:
+            ValueError: If both ``app_id`` and :attr:`package_name` are empty.
+            CommandExecutionError: If the pymobiledevice3 command fails.
+        """
+        target = self._resolve_app_id(app_id)
+        logger.info(
+            f"{_LOG_TAG} Launching {target} through dvt launch on "
+            f"{self.device_id}"
+        )
+        self._runner.run(self._command("developer", "dvt", "launch", target))
+
     def launch_app(self, app_id: str | None = None) -> None:
         target = self._resolve_app_id(app_id)
         if not self.is_installed(target):
             raise AppNotInstalledError(f"App not installed: {target}")
         logger.info(f"{_LOG_TAG} Launching app on iOS device {self.device_id}: {target}")
-        cmd = self._command("developer", "dvt", "launch", target)
-        self._runner.run(cmd)
-    
+        self.launch(target)
+
     def stop_app(self, app_id: str | None = None) -> None:
         target = self._resolve_app_id(app_id)
         try:

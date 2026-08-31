@@ -98,3 +98,64 @@ def test_install_rejects_missing_package(
 ) -> None:
     with pytest.raises(FileNotFoundError, match="Package not found"):
         ios3_device.install(tmp_path / "missing.ipa", app_id=APP_ID)
+
+
+def test_launch_uses_dvt_without_an_install_check(
+    ios3_device: IOSDevice3,
+) -> None:
+    ios3_device.launch(APP_ID)
+
+    ios3_device._runner.run.assert_called_once_with(
+        [BINARY, "developer", "dvt", "launch", APP_ID, "--udid", UDID]
+    )
+
+
+def test_launch_without_app_id_uses_bound_package_name(
+    ios3_device: IOSDevice3,
+) -> None:
+    ios3_device.launch()
+
+    ios3_device._runner.run.assert_called_once_with(
+        [BINARY, "developer", "dvt", "launch", APP_ID, "--udid", UDID]
+    )
+
+
+def test_launch_app_checks_install_then_launches(
+    ios3_device: IOSDevice3,
+) -> None:
+    ios3_device._runner.run.side_effect = [
+        CommandResult(returncode=0, stdout=f'{{"{APP_ID}": {{}}}}', stderr=""),
+        CommandResult(returncode=0, stdout="", stderr=""),
+    ]
+
+    ios3_device.launch_app(APP_ID)
+
+    assert ios3_device._runner.run.call_args_list[0].args[0] == [
+        BINARY,
+        "apps",
+        "list",
+        "--type",
+        "User",
+        "--udid",
+        UDID,
+    ]
+    assert ios3_device._runner.run.call_args_list[1].args[0] == [
+        BINARY,
+        "developer",
+        "dvt",
+        "launch",
+        APP_ID,
+        "--udid",
+        UDID,
+    ]
+
+
+def test_launch_app_rejects_uninstalled_app(ios3_device: IOSDevice3) -> None:
+    ios3_device._runner.run.return_value = CommandResult(
+        returncode=0, stdout="{}", stderr=""
+    )
+
+    with pytest.raises(AppNotInstalledError, match="App not installed"):
+        ios3_device.launch_app(APP_ID)
+
+    assert ios3_device._runner.run.call_count == 1
