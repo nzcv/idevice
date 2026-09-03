@@ -56,6 +56,9 @@ class FakeWDAClient:
         self.ready = True
         self.settings_error: Exception | None = None
         self.launch_pid: object = 4242
+        self.session_value: dict[str, Any] = {}
+        self.active_app: dict[str, Any] | None = None
+        self.active_app_error: Exception | None = None
         self.sessions: list[tuple[str, Any, Any, Any]] = []
         self.terminated: list[str] = []
         self.clicks: list[tuple[float, float]] = []
@@ -63,9 +66,17 @@ class FakeWDAClient:
         self.alert = FakeAlert()
         self.ready_waits: list[float] = []
         self.settings: list[dict[str, Any]] = []
+        self._after_request: list[Any] = []
         # Ordered names of the calls that reach WDA, so a test can assert that
         # settings land before the session the alerts monitor belongs to.
         self.calls: list[str] = []
+
+    def register_callback(
+        self, event_name: str, func: Any, try_first: bool = False
+    ) -> None:
+        del try_first
+        if event_name == "::http-request-after":
+            self._after_request.append(func)
 
     def appium_settings(self, value: dict[str, Any] | None = None) -> dict[str, Any]:
         self.calls.append("appium_settings")
@@ -94,7 +105,16 @@ class FakeWDAClient:
         if self.session_error is not None:
             raise self.session_error
         self.sessions.append((bundle_id, arguments, environment, alert_action))
+        response = type("Response", (), {"value": self.session_value})()
+        for callback in self._after_request:
+            callback(urlpath="/session", response=response)
         return self
+
+    def app_current(self) -> dict[str, Any]:
+        self.calls.append("app_current")
+        if self.active_app_error is not None:
+            raise self.active_app_error
+        return {} if self.active_app is None else self.active_app
 
     def app_list(self) -> list[dict[str, Any]]:
         self.calls.append("app_list")
@@ -327,11 +347,53 @@ def test_launch_app_keeps_pid_none_when_wda_omits_it(
 
     ios6_device.launch_app(APP_ID)
 
-    # facebook-wda 1.5.4 has no session.pid; a missing value is not a
-    # failed launch, only a missing handle for capture_memgraph.
+    # facebook-wda 1.5.4 has no session.pid, and neither the session
+    # body nor /wda/activeAppInfo supplied a replacement.
     assert ios6_device.last_launch_pid is None
     assert ios6_device._last_launch_app_id == APP_ID
     assert "app_list" not in wda_client.calls
+    assert "app_current" in wda_client.calls
+
+
+def test_launch_app_reads_pid_from_the_session_create_body(
+    ios6_device: IOSDevice6, wda_client: FakeWDAClient
+) -> None:
+    ios6_device._ios4cli.runner.run.return_value = result(stdout=INSTALLED_LISTING)
+    wda_client.launch_pid = None
+    wda_client.session_value = {"pid": 512}
+
+    ios6_device.launch_app(APP_ID)
+
+    assert ios6_device.last_launch_pid == 512
+    assert "app_current" not in wda_client.calls
+
+
+def test_launch_app_reads_pid_from_the_foreground_app(
+    ios6_device: IOSDevice6, wda_client: FakeWDAClient
+) -> None:
+    ios6_device._ios4cli.runner.run.return_value = result(stdout=INSTALLED_LISTING)
+    wda_client.launch_pid = None
+    wda_client.active_app = {"pid": 8675, "bundleId": APP_ID}
+
+    ios6_device.launch_app(APP_ID)
+
+    assert ios6_device.last_launch_pid == 8675
+    assert wda_client.calls[-1] == "app_current"
+
+
+def test_launch_app_ignores_a_foreground_pid_for_another_app(
+    ios6_device: IOSDevice6, wda_client: FakeWDAClient
+) -> None:
+    ios6_device._ios4cli.runner.run.return_value = result(stdout=INSTALLED_LISTING)
+    wda_client.launch_pid = None
+    wda_client.active_app = {
+        "pid": 8675,
+        "bundleId": "com.example.other",
+    }
+
+    ios6_device.launch_app(APP_ID)
+
+    assert ios6_device.last_launch_pid is None
 
 
 def test_launch_app_raises_instead_of_falling_back_to_ios4(

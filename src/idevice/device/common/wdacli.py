@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 
 import wda
-from wda import AlertAction
+from wda import AlertAction, Callback
 
 from idevice.device.common.iwda2 import validate_normalized_coordinate
 
@@ -40,6 +40,46 @@ ACCEPT_ALERT_BUTTON_LABELS = (
 
 class WDACLIError(RuntimeError):
     """Raised when a WebDriverAgent operation cannot be completed."""
+
+
+def _valid_pid(pid: object) -> int | None:
+    """Return ``pid`` when it is a positive process identifier."""
+    if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
+        return pid
+    return None
+
+
+def _pid_from_wda_value(value: object) -> int | None:
+    """Read ``pid`` from a WDA JSON ``value`` object when present."""
+    if not isinstance(value, dict):
+        return None
+    return _valid_pid(value.get("pid"))
+
+
+def _pid_from_active_app(session: object, app_id: str) -> int | None:
+    """Return the foreground PID when WDA says ``app_id`` is active.
+
+    Official ``facebook-wda`` 1.5.4 has no ``session.pid``. The session
+    create response is also dropped by that client, so the PID has to be
+    read back from ``GET /wda/activeAppInfo``.
+    """
+    app_current = getattr(session, "app_current", None)
+    if not callable(app_current):
+        return None
+    try:
+        current = app_current()
+    except Exception as exc:
+        logger.debug(f"{_LOG_TAG} WDA active-app probe failed: {exc}")
+        return None
+    if not isinstance(current, dict):
+        return None
+    bundle_id = current.get("bundleId")
+    if bundle_id != app_id:
+        logger.info(
+            f"{_LOG_TAG} WDA active app is {bundle_id!r}, not {app_id}"
+        )
+        return None
+    return _valid_pid(current.get("pid"))
 
 
 def build_accept_alert_selector(
@@ -196,9 +236,11 @@ class WDACLI:
                 ``alert_action`` is :attr:`AlertAction.ACCEPT`.
 
         Returns:
-            int | None: The positive PID WDA reports for ``app_id``, or
-            ``None`` when the client does not expose one (``facebook-wda``
-            1.5.4 has no ``session.pid``).
+            int | None: The positive PID for ``app_id``. Official
+            ``facebook-wda`` 1.5.4 has no ``session.pid`` and drops the
+            session-create body, so this also reads ``value.pid`` from that
+            response when the callback fires, then
+            ``GET /wda/activeAppInfo`` when the launched app is foreground.
 
         Raises:
             ValueError: If ``app_id`` is empty, or if a button label contains a
@@ -213,15 +255,29 @@ class WDACLI:
             if alert_action is AlertAction.ACCEPT
             else ""
         )
+        client = self.client()
+        captured_pid: int | None = None
+
+        def _capture_session_pid(
+            *, urlpath: str = "", response: object = None
+        ) -> None:
+            nonlocal captured_pid
+            if urlpath.lstrip("/") != "session":
+                return
+            pid = _pid_from_wda_value(getattr(response, "value", None))
+            if pid is not None:
+                captured_pid = pid
+
+        register = getattr(client, "register_callback", None)
+        if callable(register):
+            register(Callback.HTTP_REQUEST_AFTER, _capture_session_pid)
         try:
-            session = self.client().session(
+            session = client.session(
                 app_id,
                 arguments=args or None,
                 environment=environment or None,
                 alert_action=alert_action,
             )
-            pid = getattr(session, "pid", None)
-            logger.info(f"{_LOG_TAG} WDA launched {app_id} at {self.url} with pid {pid}")
         except Exception as exc:
             raise WDACLIError(
                 f"{_LOG_TAG} WDA failed to launch {app_id} at {self.url}: {exc}"
@@ -236,13 +292,18 @@ class WDACLI:
                     f"{AUTO_CLICK_ALERT_SETTING} at {self.url}, so its "
                     f"alerts monitor never starts: {exc}"
                 ) from exc
-        pid = getattr(session, "pid", None)
-        if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        pid = (
+            _valid_pid(getattr(session, "pid", None))
+            or captured_pid
+            or _pid_from_active_app(session, app_id)
+        )
+        if pid is None:
             logger.info(
                 f"{_LOG_TAG} WDA launch response for {app_id} at {self.url} "
                 "did not include a valid PID"
             )
             return None
+        logger.info(f"{_LOG_TAG} WDA launched {app_id} at {self.url} with pid {pid}")
         return pid
 
     def stop_app(self, app_id: str) -> None:
