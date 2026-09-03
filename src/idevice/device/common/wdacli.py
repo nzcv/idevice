@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import Any
 
 import wda
 from wda import AlertAction
@@ -16,28 +15,6 @@ logger = logging.getLogger(__name__)
 _LOG_TAG = "[WDACLI]"
 WDA_PORT = 8100
 WDA_READY_TIMEOUT = 60.0
-POPUP_BUTTON_LABELS = (
-    "无线局域网与蜂窝网络",
-    "继续",
-    "使用App时允许",
-    "Allow",
-    "Allow Once",
-    "Allow While Using App",
-    "Allow Access",
-    "Allow Access to Local Network",
-    "Allow Access to Network",
-    "允许访问",
-    "允许访问本地网络",
-    "允许",
-    "同意",
-    "确定",
-    "重试",
-    "不允许",
-    "OK",
-    "Cancel",
-    "取消",
-    "稍后",
-)
 
 
 class WDACLIError(RuntimeError):
@@ -48,7 +25,7 @@ class WDACLI:
     """Drive WebDriverAgent through ``facebook-wda`` for one device.
 
     This class owns only WDA concerns: client construction, session reuse,
-    launch/terminate requests, screen taps, and message-popup dismissal.
+    launch/terminate requests, and screen taps.
     """
 
     def __init__(
@@ -149,7 +126,7 @@ class WDACLI:
             environment: Environment variables injected before process start.
             alert_action: How WebDriverAgent should answer alerts on its own.
                 ``None`` leaves its monitor off, which means alerts stay on
-                screen until :meth:`dismiss_message_popup` clears them.
+                screen until something else on the device clears them.
 
         Returns:
             int | None: The PID WDA reports for ``app_id``, or ``None`` when
@@ -226,86 +203,8 @@ class WDACLI:
                 f"{_LOG_TAG} WDA failed to tap ({x}, {y}) at {self.url}: {exc}"
             ) from exc
 
-    def dismiss_message_popup(
-        self,
-        *,
-        button_labels: tuple[str, ...] | list[str] | None = None,
-        timeout: float = 1.0,
-    ) -> bool:
-        """Clear the alert currently on screen, if there is one.
-
-        Continuous popup handling belongs to WebDriverAgent's own alerts
-        monitor, enabled through the ``alert_action`` argument of
-        :meth:`launch_app`. This method is the manual counterpart: it inspects
-        the screen once, which is what a caller needs when no session-scoped
-        monitor is running (right after the agent starts, say) or when a
-        specific button must be pressed.
-
-        Args:
-            button_labels: Labels tried in order, so a preferred button wins
-                over a fallback. Defaults to a built-in set that covers common
-                iOS and Chinese popups.
-            timeout: Per-element check timeout for alert/button presence.
-
-        Returns:
-            bool: Whether a popup button was clicked.
-
-        Raises:
-            ValueError: If ``timeout`` is not a positive number.
-            WDACLIError: If the WDA session cannot be reached.
-        """
-        if timeout <= 0:
-            raise ValueError("timeout must be a positive number")
-
-        labels = self.normalize_message_popup_labels(button_labels)
-        try:
-            return self.dismiss_message_popup_with_session(
-                self.client(), labels, timeout
-            )
-        except Exception as exc:
-            raise WDACLIError(
-                f"{_LOG_TAG} WDA failed to handle message popup at "
-                f"{self.url}: {exc}"
-            ) from exc
-
-    @staticmethod
-    def dismiss_message_popup_with_session(
-        session: Any, labels: tuple[str, ...], timeout: float
-    ) -> bool:
-        """Click the first known button on an active alert, if any.
-
-        Returns whether a button was clicked.
-        """
-        if not session.alert.exists:
-            return False
-        for label in labels:
-            button = session(text=label, timeout=timeout)
-            if button.exists:
-                logger.info(f"{_LOG_TAG} Dismissing popup with button {label!r}")
-                button.click()
-                return True
-        return False
-
-    @staticmethod
-    def normalize_message_popup_labels(
-        button_labels: tuple[str, ...] | list[str] | None,
-    ) -> tuple[str, ...]:
-        """Return validated, de-duplicated popup button labels."""
-        labels = button_labels if button_labels is not None else POPUP_BUTTON_LABELS
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for label in labels:
-            if not label or label in seen:
-                continue
-            normalized.append(label)
-            seen.add(label)
-        if not normalized:
-            raise ValueError("at least one button label is required")
-        return tuple(normalized)
-
 
 __all__ = [
-    "POPUP_BUTTON_LABELS",
     "WDA_PORT",
     "WDA_READY_TIMEOUT",
     "AlertAction",

@@ -40,7 +40,6 @@ class IOSDevice6(DeviceBase):
       ``defaultAlertAction`` leaves WebDriverAgent answering permission
       prompts on its own.
     * :meth:`tap` sends normalized screen taps.
-    * :meth:`dismiss_message_popup` clears a prompt already on screen.
 
     The agent has to be running before any of that works: this backend does
     not start the xctest runner. Use :meth:`launch` with the runner bundle id,
@@ -154,7 +153,7 @@ class IOSDevice6(DeviceBase):
             environment: Environment variables injected before process start.
             alert_action: How WebDriverAgent should answer alerts on its own.
                 ``None`` leaves its monitor off, which means prompts stay up
-                until :meth:`dismiss_message_popup` clears them.
+                until something else on the device clears them.
 
         Raises:
             ValueError: If both ``app_id`` and :attr:`package_name` are empty.
@@ -256,39 +255,6 @@ class IOSDevice6(DeviceBase):
         )
         try:
             self._wda.tap(x, y)
-        except WDACLIError as exc:
-            raise IOSDevice6Error(str(exc)) from exc
-
-    def dismiss_message_popup(
-        self,
-        *,
-        button_labels: tuple[str, ...] | list[str] | None = None,
-        timeout: float = 1.0,
-    ) -> bool:
-        """Clear the alert currently on screen, if there is one.
-
-        Prompts raised by a running app are handled by WebDriverAgent's own
-        alerts monitor, which :meth:`launch_app` enables for its session. Use
-        this when no such session is live, or to press a specific button.
-
-        Args:
-            button_labels: Labels tried in order, so a preferred button wins
-                over a fallback. Defaults to a built-in set covering common
-                iOS and Chinese popups.
-            timeout: Per-element check timeout for alert/button presence.
-
-        Returns:
-            bool: Whether a popup button was clicked.
-
-        Raises:
-            ValueError: If ``timeout`` is not a positive number.
-            IOSDevice6Error: If the WDA session cannot be reached.
-        """
-        try:
-            return self._wda.dismiss_message_popup(
-                button_labels=button_labels,
-                timeout=timeout,
-            )
         except WDACLIError as exc:
             raise IOSDevice6Error(str(exc)) from exc
 

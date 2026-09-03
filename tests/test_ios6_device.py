@@ -30,10 +30,6 @@ class FakeElement:
 
     def __init__(self, *, exists: bool) -> None:
         self.exists = exists
-        self.clicks = 0
-
-    def click(self) -> None:
-        self.clicks += 1
 
 
 class FakeAlert:
@@ -56,7 +52,6 @@ class FakeWDAClient:
         self.terminated: list[str] = []
         self.clicks: list[tuple[float, float]] = []
         self.queries: list[tuple[str, float]] = []
-        self.elements: dict[str, FakeElement] = {}
         self.alert = FakeAlert()
         self.ready_waits: list[float] = []
 
@@ -92,7 +87,7 @@ class FakeWDAClient:
 
     def __call__(self, text: str = "", timeout: float = 0.0) -> FakeElement:
         self.queries.append((text, timeout))
-        return self.elements.get(text, FakeElement(exists=False))
+        return FakeElement(exists=False)
 
 
 @pytest.fixture
@@ -319,57 +314,6 @@ def test_tap_raises_when_wda_rejects_the_click(
 
     with pytest.raises(IOSDevice6Error, match="WDA failed to tap"):
         ios6_device.tap(0.5, 0.5)
-
-
-def test_dismiss_message_popup_clicks_the_first_known_label(
-    ios6_device: IOSDevice6, wda_client: FakeWDAClient
-) -> None:
-    wda_client.alert.exists = True
-    button = FakeElement(exists=True)
-    wda_client.elements["允许"] = button
-
-    assert ios6_device.dismiss_message_popup() is True
-    assert button.clicks == 1
-
-
-def test_dismiss_message_popup_is_false_without_an_alert(
-    ios6_device: IOSDevice6, wda_client: FakeWDAClient
-) -> None:
-    wda_client.alert.exists = False
-
-    assert ios6_device.dismiss_message_popup() is False
-    assert wda_client.queries == []
-
-
-def test_dismiss_message_popup_honours_custom_labels(
-    ios6_device: IOSDevice6, wda_client: FakeWDAClient
-) -> None:
-    wda_client.alert.exists = True
-
-    assert (
-        ios6_device.dismiss_message_popup(button_labels=["下次再说"], timeout=2.0)
-        is False
-    )
-    assert wda_client.queries == [("下次再说", 2.0)]
-
-
-@pytest.mark.parametrize("kwargs", [{"timeout": 0}, {"button_labels": []}])
-def test_dismiss_message_popup_validates_arguments(
-    ios6_device: IOSDevice6, kwargs: dict[str, Any]
-) -> None:
-    with pytest.raises(ValueError):
-        ios6_device.dismiss_message_popup(**kwargs)
-
-
-def test_dismiss_message_popup_raises_when_wda_is_unreachable(
-    ios6_device: IOSDevice6,
-) -> None:
-    ios6_device._wda.client_factory = MagicMock(
-        side_effect=RuntimeError("connection refused")
-    )
-
-    with pytest.raises(IOSDevice6Error, match="message popup"):
-        ios6_device.dismiss_message_popup()
 
 
 def test_stop_app_uses_ios4_pkill_and_clears_the_launch_pid(
