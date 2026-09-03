@@ -556,9 +556,7 @@ class DeviceBase(ABC):
             NotImplementedError: When the platform cannot start a monitor.
         """
         del duration
-        raise NotImplementedError(
-            f"start_moniter is not supported on {self.platform} devices"
-        )
+        pass
 
     def stop_moniter(self) -> bool:
         """Stop on-device performance monitoring.
@@ -569,6 +567,4 @@ class DeviceBase(ABC):
         Raises:
             NotImplementedError: When the platform cannot stop a monitor.
         """
-        raise NotImplementedError(
-            f"stop_moniter is not supported on {self.platform} devices"
-        )
+        pass

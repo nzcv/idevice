@@ -7,6 +7,7 @@ import pytest
 from idevice.device.device import Device
 from idevice.device.dummy.device import DummyDevice
 from idevice.device.ios4.device import IOSDevice4
+from idevice.device.ios6.device import IOSDevice6
 
 
 def test_create_rejects_unknown_platform() -> None:
@@ -45,6 +46,28 @@ def test_create_ios4_backend(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert isinstance(device, IOSDevice4)
     assert device.platform == "ios4"
+    assert device.package_name == "com.example.game"
+    Device.reset()
+
+
+def test_create_ios6_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    Device.reset()
+    monkeypatch.setattr(
+        "idevice.device.common.ios4cli.shutil.which",
+        lambda _name: "/usr/local/bin/ios4",
+    )
+
+    # The plain ``ios`` platform string routes to the WDA-backed backend;
+    # ios3 is reached through ``ios3``.
+    device = Device.create(
+        "ios",
+        device_id="00000000-0000000000000000",
+        device_ip="192.0.2.60",
+        package_name="com.example.game",
+    )
+
+    assert isinstance(device, IOSDevice6)
+    assert device.platform == "ios6"
     assert device.package_name == "com.example.game"
     Device.reset()
 

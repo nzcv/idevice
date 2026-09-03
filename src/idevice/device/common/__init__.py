@@ -8,6 +8,14 @@ from idevice.device.common.iwda2 import (
     IWDA2Error,
     IWDA2Mixin,
 )
+from idevice.device.common.wdacli import (
+    POPUP_BUTTON_LABELS,
+    WDA_PORT,
+    WDA_READY_TIMEOUT,
+    WDACLI,
+    AlertAction,
+    WDACLIError,
+)
 from idevice.device.common.xcruncli import (
     DevicectlOutcome,
     IOSDevice5Error,
@@ -25,6 +33,12 @@ __all__ = [
     "IWDA2_PORT",
     "IWDA2Error",
     "IWDA2Mixin",
+    "POPUP_BUTTON_LABELS",
+    "WDA_PORT",
+    "WDA_READY_TIMEOUT",
+    "AlertAction",
+    "WDACLI",
+    "WDACLIError",
     "XcrunCLI",
     "XcrunCLIError",
 ]

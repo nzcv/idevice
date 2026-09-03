@@ -42,7 +42,7 @@ pytestmark = pytest.mark.integration
 
 
 def test_factory_creates_ios3_device(ios3_udid: str) -> None:
-    device = Device.create("ios", device_id=ios3_udid, device_ip="")
+    device = Device.create("ios3", device_id=ios3_udid, device_ip="")
     assert isinstance(device, IOSDevice3)
     assert device.device_id == ios3_udid
 
