@@ -13,7 +13,14 @@ from idevice.device.base.errors import AppNotInstalledError
 from idevice.device.base.runner import CommandResult
 from idevice.device.common.ios4cli import IOS4CLI
 from idevice.device.common.iwda2 import IWDA2Mixin
-from idevice.device.common.wdacli import WDA_READY_TIMEOUT, WDACLI, AlertAction
+from idevice.device.common.wdacli import (
+    ACCEPT_ALERT_BUTTON_LABELS,
+    AUTO_CLICK_ALERT_SETTING,
+    WDA_READY_TIMEOUT,
+    WDACLI,
+    AlertAction,
+    build_accept_alert_selector,
+)
 from idevice.device.ios6.device import IOSDevice6, IOSDevice6Error
 
 APP_ID = "com.example.game"
@@ -47,13 +54,27 @@ class FakeWDAClient:
         self.session_error: Exception | None = None
         self.click_error: Exception | None = None
         self.ready = True
-        self.apps: list[dict[str, Any]] = []
+        self.settings_error: Exception | None = None
+        self.launch_pid: object = 4242
         self.sessions: list[tuple[str, Any, Any, Any]] = []
         self.terminated: list[str] = []
         self.clicks: list[tuple[float, float]] = []
         self.queries: list[tuple[str, float]] = []
         self.alert = FakeAlert()
         self.ready_waits: list[float] = []
+        self.settings: list[dict[str, Any]] = []
+        # Ordered names of the calls that reach WDA, so a test can assert that
+        # settings land before the session the alerts monitor belongs to.
+        self.calls: list[str] = []
+
+    def appium_settings(self, value: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.calls.append("appium_settings")
+        if self.settings_error is not None:
+            raise self.settings_error
+        if value is None:
+            return self.settings[-1] if self.settings else {}
+        self.settings.append(value)
+        return value
 
     def is_ready(self) -> bool:
         return self.ready
@@ -69,13 +90,19 @@ class FakeWDAClient:
         environment: dict[str, str] | None = None,
         alert_action: str | None = None,
     ) -> FakeWDAClient:
+        self.calls.append("session")
         if self.session_error is not None:
             raise self.session_error
         self.sessions.append((bundle_id, arguments, environment, alert_action))
         return self
 
     def app_list(self) -> list[dict[str, Any]]:
-        return self.apps
+        self.calls.append("app_list")
+        raise AssertionError("launch PID must come from the session response")
+
+    @property
+    def pid(self) -> object:
+        return self.launch_pid
 
     def app_terminate(self, bundle_id: str) -> None:
         self.terminated.append(bundle_id)
@@ -126,6 +153,11 @@ def ios4_commands(device: IOSDevice6) -> list[list[str]]:
     return [call.args[0] for call in device._ios4cli.runner.run.call_args_list]
 
 
+def label_count(selector: str) -> int:
+    """Return how many quoted labels a class chain selector matches."""
+    return selector.count("'") // 2
+
+
 def test_ios6_composes_the_shared_cli_layers(ios6_device: IOSDevice6) -> None:
     assert isinstance(ios6_device._ios4cli, IOS4CLI)
     assert isinstance(ios6_device._wda, WDACLI)
@@ -154,8 +186,6 @@ def test_launch_app_opens_a_wda_session_with_args_and_environment(
     ios6_device: IOSDevice6, wda_client: FakeWDAClient
 ) -> None:
     ios6_device._ios4cli.runner.run.return_value = result(stdout=INSTALLED_LISTING)
-    wda_client.apps = [{"bundleId": APP_ID, "pid": 4242}]
-
     ios6_device.launch_app(
         args=["-logLevel", "debug"], environment={"UNITY_DEBUG": "1"}
     )
@@ -181,6 +211,75 @@ def test_launch_app_enables_the_wda_alert_monitor(
     assert wda_client.sessions[0][3] == AlertAction.ACCEPT
 
 
+def test_accept_alert_selector_matches_only_affirmative_buttons() -> None:
+    selector = build_accept_alert_selector()
+
+    assert selector.startswith("**/XCUIElementTypeButton[`label IN {")
+    for label in ("允许", "好", "Allow", "无线局域网与蜂窝网络"):
+        assert f"'{label}'" in selector
+    for label in ("不允许", "取消", "Cancel", "稍后"):
+        assert label not in selector
+    assert label_count(selector) == len(ACCEPT_ALERT_BUTTON_LABELS)
+
+
+def test_accept_alert_selector_drops_duplicates_and_empty_labels() -> None:
+    selector = build_accept_alert_selector(["允许", "", "允许", "好"])
+
+    assert selector == "**/XCUIElementTypeButton[`label IN {'允许','好'}`]"
+
+
+@pytest.mark.parametrize("labels", [[], [""], ["Don't Allow"], ["a`b"]])
+def test_accept_alert_selector_rejects_unusable_labels(labels: list[str]) -> None:
+    # A quote or backtick would break out of the class chain query.
+    with pytest.raises(ValueError):
+        build_accept_alert_selector(labels)
+
+
+def test_launch_app_pins_the_accept_button_on_the_new_session(
+    ios6_device: IOSDevice6, wda_client: FakeWDAClient
+) -> None:
+    ios6_device._ios4cli.runner.run.return_value = result(stdout=INSTALLED_LISTING)
+
+    ios6_device.launch_app(APP_ID)
+
+    # facebook-wda drops defaultAlertAction, so the monitor is started by
+    # posting autoClickAlertSelector on the session the launch created.
+    assert wda_client.calls == ["session", "appium_settings"]
+    selector = wda_client.settings[0][AUTO_CLICK_ALERT_SETTING]
+    assert "'允许'" in selector
+    # Accepting must never resolve to a deny button.
+    assert "不允许" not in selector
+
+
+def test_launch_app_honours_custom_accept_button_labels(
+    ios6_device: IOSDevice6, wda_client: FakeWDAClient
+) -> None:
+    ios6_device._ios4cli.runner.run.return_value = result(stdout=INSTALLED_LISTING)
+
+    ios6_device.launch_app(APP_ID, accept_button_labels=["同意并继续"])
+
+    assert wda_client.settings[0] == {
+        AUTO_CLICK_ALERT_SETTING: (
+            "**/XCUIElementTypeButton[`label IN {'同意并继续'}`]"
+        )
+    }
+
+
+def test_launch_app_raises_when_the_accept_button_cannot_be_pinned(
+    ios6_device: IOSDevice6, wda_client: FakeWDAClient
+) -> None:
+    ios6_device._ios4cli.runner.run.return_value = result(stdout=INSTALLED_LISTING)
+    wda_client.settings_error = RuntimeError("no session")
+
+    with pytest.raises(IOSDevice6Error, match=AUTO_CLICK_ALERT_SETTING):
+        ios6_device.launch_app(APP_ID)
+
+    # The app is already up by then; reporting it beats letting the monitor
+    # answer prompts with its positional guess.
+    assert wda_client.sessions[0][0] == APP_ID
+    assert ios6_device.last_launch_pid is None
+
+
 def test_launch_app_can_leave_the_alert_monitor_off(
     ios6_device: IOSDevice6, wda_client: FakeWDAClient
 ) -> None:
@@ -189,6 +288,19 @@ def test_launch_app_can_leave_the_alert_monitor_off(
     ios6_device.launch_app(APP_ID, alert_action=None)
 
     assert wda_client.sessions[0][3] is None
+    # With no monitor running there is no accept button to pin.
+    assert wda_client.settings == []
+
+
+def test_launch_app_does_not_pin_an_accept_button_when_dismissing(
+    ios6_device: IOSDevice6, wda_client: FakeWDAClient
+) -> None:
+    ios6_device._ios4cli.runner.run.return_value = result(stdout=INSTALLED_LISTING)
+
+    ios6_device.launch_app(APP_ID, alert_action=AlertAction.DISMISS)
+
+    assert wda_client.sessions[0][3] == AlertAction.DISMISS
+    assert wda_client.settings == []
 
 
 def test_launch_app_dismisses_alerts_with_wda_not_polling(
@@ -203,15 +315,23 @@ def test_launch_app_dismisses_alerts_with_wda_not_polling(
     assert wda_client.queries == []
 
 
-def test_launch_app_keeps_pid_none_when_wda_reports_no_app(
+@pytest.mark.parametrize("pid", [None, True, 0, -1, "4242"])
+def test_launch_app_keeps_pid_none_when_wda_omits_it(
+    pid: object,
     ios6_device: IOSDevice6, wda_client: FakeWDAClient
 ) -> None:
     ios6_device._ios4cli.runner.run.return_value = result(stdout=INSTALLED_LISTING)
-    wda_client.apps = [{"bundleId": "com.example.other", "pid": 11}]
+    ios6_device._last_launch_pid = 11
+    ios6_device._last_launch_app_id = APP_ID
+    wda_client.launch_pid = pid
 
     ios6_device.launch_app(APP_ID)
 
+    # facebook-wda 1.5.4 has no session.pid; a missing value is not a
+    # failed launch, only a missing handle for capture_memgraph.
     assert ios6_device.last_launch_pid is None
+    assert ios6_device._last_launch_app_id == APP_ID
+    assert "app_list" not in wda_client.calls
 
 
 def test_launch_app_raises_instead_of_falling_back_to_ios4(
@@ -219,6 +339,8 @@ def test_launch_app_raises_instead_of_falling_back_to_ios4(
 ) -> None:
     ios6_device._ios4cli.runner.run.return_value = result(stdout=INSTALLED_LISTING)
     wda_client.session_error = RuntimeError("WDA unreachable")
+    ios6_device._last_launch_pid = 11
+    ios6_device._last_launch_app_id = APP_ID
 
     with pytest.raises(IOSDevice6Error, match="WDA failed to launch"):
         ios6_device.launch_app(APP_ID)
@@ -227,17 +349,23 @@ def test_launch_app_raises_instead_of_falling_back_to_ios4(
         "process_control" not in command
         for command in ios4_commands(ios6_device)
     )
+    assert ios6_device.last_launch_pid is None
+    assert ios6_device._last_launch_app_id == ""
 
 
 def test_launch_app_rejects_an_app_that_is_not_installed(
     ios6_device: IOSDevice6, wda_client: FakeWDAClient
 ) -> None:
     ios6_device._ios4cli.runner.run.return_value = result(stdout="")
+    ios6_device._last_launch_pid = 11
+    ios6_device._last_launch_app_id = APP_ID
 
     with pytest.raises(AppNotInstalledError, match=APP_ID):
         ios6_device.launch_app(APP_ID)
 
     assert wda_client.sessions == []
+    assert ios6_device.last_launch_pid is None
+    assert ios6_device._last_launch_app_id == ""
 
 
 def test_launch_uses_ios4_process_control(
@@ -320,7 +448,6 @@ def test_stop_app_uses_ios4_pkill_and_clears_the_launch_pid(
     ios6_device: IOSDevice6, wda_client: FakeWDAClient
 ) -> None:
     ios6_device._ios4cli.runner.run.return_value = result(stdout=INSTALLED_LISTING)
-    wda_client.apps = [{"bundleId": APP_ID, "pid": 4242}]
     ios6_device.launch_app(APP_ID)
     ios6_device._ios4cli.runner.run.return_value = result()
 
@@ -449,6 +576,27 @@ def test_capture_memgraph_shells_out_to_ios4(
     command = ios4_commands(ios6_device)[0]
     assert command[:5] == [BINARY, "--udid", UDID, "memgraph", "4242"]
     assert output.read_bytes() == b"memgraph"
+
+
+def test_capture_memgraph_uses_the_pid_returned_by_wda(
+    ios6_device: IOSDevice6, wda_client: FakeWDAClient, tmp_path: Path
+) -> None:
+    output = tmp_path / "launched-game.memgraph"
+    ios6_device._ios4cli.runner.run.return_value = result(
+        stdout=INSTALLED_LISTING
+    )
+    wda_client.launch_pid = 8675
+    ios6_device.launch_app(APP_ID)
+
+    def capture(command: list[str], **_kwargs: object) -> CommandResult:
+        Path(command[-1]).write_bytes(b"memgraph")
+        return result()
+
+    ios6_device._ios4cli.runner.run.side_effect = capture
+
+    assert ios6_device.capture_memgraph(output) == output.resolve()
+    command = ios4_commands(ios6_device)[-1]
+    assert command[:5] == [BINARY, "--udid", UDID, "memgraph", "8675"]
 
 
 def afc_command(*arguments: str) -> list[str]:

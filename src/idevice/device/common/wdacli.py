@@ -15,10 +15,66 @@ logger = logging.getLogger(__name__)
 _LOG_TAG = "[WDACLI]"
 WDA_PORT = 8100
 WDA_READY_TIMEOUT = 60.0
+AUTO_CLICK_ALERT_SETTING = "autoClickAlertSelector"
+ACCEPT_ALERT_BUTTON_LABELS = (
+    "无线局域网与蜂窝网络",
+    "允许",
+    "好",
+    "使用App时允许",
+    "仅在使用应用期间",
+    "始终允许",
+    "允许访问",
+    "允许访问本地网络",
+    "同意",
+    "确定",
+    "继续",
+    "Allow",
+    "Allow Once",
+    "Allow While Using App",
+    "Allow Access",
+    "OK",
+    "Yes",
+    "Continue",
+)
 
 
 class WDACLIError(RuntimeError):
     """Raised when a WebDriverAgent operation cannot be completed."""
+
+
+def build_accept_alert_selector(
+    labels: tuple[str, ...] | list[str] | None = None,
+) -> str:
+    """Build the class chain WebDriverAgent uses to find an accept button.
+
+    Args:
+        labels: Button labels to match. Defaults to
+            :data:`ACCEPT_ALERT_BUTTON_LABELS`.
+
+    Returns:
+        str: A class chain query such as
+        ``**/XCUIElementTypeButton[`label IN {'允许','好'}`]``.
+
+    Raises:
+        ValueError: If no usable label is left, or if a label contains a quote
+            or a backtick, either of which would break the query.
+    """
+    source = labels if labels is not None else ACCEPT_ALERT_BUTTON_LABELS
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for label in source:
+        if not label or label in seen:
+            continue
+        if "'" in label or "`" in label:
+            raise ValueError(
+                f"button label must not contain a quote or a backtick: {label!r}"
+            )
+        normalized.append(label)
+        seen.add(label)
+    if not normalized:
+        raise ValueError("at least one button label is required")
+    joined = ",".join(f"'{label}'" for label in normalized)
+    return f"**/XCUIElementTypeButton[`label IN {{{joined}}}`]"
 
 
 class WDACLI:
@@ -108,6 +164,7 @@ class WDACLI:
         args: list[str] | None = None,
         environment: dict[str, str] | None = None,
         alert_action: AlertAction | None = AlertAction.ACCEPT,
+        accept_button_labels: tuple[str, ...] | list[str] | None = None,
     ) -> int | None:
         """Launch ``app_id`` through WebDriverAgent and return its PID.
 
@@ -115,10 +172,17 @@ class WDACLI:
         application under test on some WebDriverAgent builds.
 
         ``alert_action`` is sent as WebDriverAgent's ``defaultAlertAction``
-        capability, which starts its built-in alerts monitor: for the life of
-        the session WDA itself taps the accept (or dismiss) button of every
-        alert the app raises, so permission prompts during launch or login need
-        no polling from this side.
+        capability. facebook-wda places that key next to ``alwaysMatch``
+        rather than inside it, so WDA's capability parser drops it and the
+        session comes up with ``FBAlertsMonitor`` off. The accept-button
+        class chain is therefore posted as ``autoClickAlertSelector``, which
+        is the settings path that both starts the monitor and names the
+        button it should tap.
+
+        The monitor is started by that settings write, not by session
+        creation, so it sees every prompt after the settings land. A prompt
+        that appears in the round trip between the app starting and the
+        settings landing is still missed.
 
         Args:
             app_id: Bundle identifier to launch.
@@ -127,17 +191,28 @@ class WDACLI:
             alert_action: How WebDriverAgent should answer alerts on its own.
                 ``None`` leaves its monitor off, which means alerts stay on
                 screen until something else on the device clears them.
+            accept_button_labels: Labels that count as accepting a prompt.
+                Defaults to :data:`ACCEPT_ALERT_BUTTON_LABELS`. Only used when
+                ``alert_action`` is :attr:`AlertAction.ACCEPT`.
 
         Returns:
-            int | None: The PID WDA reports for ``app_id``, or ``None`` when
-            its app list does not include one.
+            int | None: The positive PID WDA reports for ``app_id``, or
+            ``None`` when the client does not expose one (``facebook-wda``
+            1.5.4 has no ``session.pid``).
 
         Raises:
-            ValueError: If ``app_id`` is empty.
-            WDACLIError: If WebDriverAgent does not accept the launch.
+            ValueError: If ``app_id`` is empty, or if a button label contains a
+                quote or a backtick.
+            WDACLIError: If WebDriverAgent does not accept the launch or does
+                not take the accept-button setting once the app is up.
         """
         if not app_id:
             raise ValueError("app_id is required and must be a non-empty string")
+        selector = (
+            build_accept_alert_selector(accept_button_labels)
+            if alert_action is AlertAction.ACCEPT
+            else ""
+        )
         try:
             session = self.client().session(
                 app_id,
@@ -145,27 +220,30 @@ class WDACLI:
                 environment=environment or None,
                 alert_action=alert_action,
             )
+            pid = getattr(session, "pid", None)
+            logger.info(f"{_LOG_TAG} WDA launched {app_id} at {self.url} with pid {pid}")
         except Exception as exc:
             raise WDACLIError(
                 f"{_LOG_TAG} WDA failed to launch {app_id} at {self.url}: {exc}"
             ) from exc
-        return self._session_pid(session, app_id)
-
-    @staticmethod
-    def _session_pid(session: wda.Client, app_id: str) -> int | None:
-        """Return the PID WDA reports for ``app_id``, when it reports one."""
-        try:
-            entries = session.app_list()
-        except Exception as exc:
-            logger.debug(f"{_LOG_TAG} WDA app list unavailable: {exc}")
+        if selector:
+            logger.info(f"{_LOG_TAG} Pinning the WDA accept button to {selector}")
+            try:
+                session.appium_settings({AUTO_CLICK_ALERT_SETTING: selector})
+            except Exception as exc:
+                raise WDACLIError(
+                    f"{_LOG_TAG} WDA launched {app_id} but would not take "
+                    f"{AUTO_CLICK_ALERT_SETTING} at {self.url}, so its "
+                    f"alerts monitor never starts: {exc}"
+                ) from exc
+        pid = getattr(session, "pid", None)
+        if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+            logger.info(
+                f"{_LOG_TAG} WDA launch response for {app_id} at {self.url} "
+                "did not include a valid PID"
+            )
             return None
-        for entry in entries or []:
-            if entry.get("bundleId") != app_id:
-                continue
-            pid = entry.get("pid")
-            if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
-                return pid
-        return None
+        return pid
 
     def stop_app(self, app_id: str) -> None:
         """Terminate ``app_id`` through WebDriverAgent.
@@ -205,9 +283,12 @@ class WDACLI:
 
 
 __all__ = [
+    "ACCEPT_ALERT_BUTTON_LABELS",
+    "AUTO_CLICK_ALERT_SETTING",
     "WDA_PORT",
     "WDA_READY_TIMEOUT",
     "AlertAction",
+    "build_accept_alert_selector",
     "WDACLI",
     "WDACLIError",
 ]

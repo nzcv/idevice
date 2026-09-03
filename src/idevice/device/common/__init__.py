@@ -9,11 +9,14 @@ from idevice.device.common.iwda2 import (
     IWDA2Mixin,
 )
 from idevice.device.common.wdacli import (
+    ACCEPT_ALERT_BUTTON_LABELS,
+    AUTO_CLICK_ALERT_SETTING,
     WDA_PORT,
     WDA_READY_TIMEOUT,
     WDACLI,
     AlertAction,
     WDACLIError,
+    build_accept_alert_selector,
 )
 from idevice.device.common.xcruncli import (
     DevicectlOutcome,
@@ -23,6 +26,8 @@ from idevice.device.common.xcruncli import (
 )
 
 __all__ = [
+    "ACCEPT_ALERT_BUTTON_LABELS",
+    "AUTO_CLICK_ALERT_SETTING",
     "DevicectlOutcome",
     "IOS4CLI",
     "IOS4CLIError",
@@ -39,4 +44,5 @@ __all__ = [
     "WDACLIError",
     "XcrunCLI",
     "XcrunCLIError",
+    "build_accept_alert_selector",
 ]

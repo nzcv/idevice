@@ -36,9 +36,9 @@ class IOSDevice6(DeviceBase):
 
     WebDriverAgent owns the interactive surface:
 
-    * :meth:`launch_app` starts the app under test through a WDA session whose
-      ``defaultAlertAction`` leaves WebDriverAgent answering permission
-      prompts on its own.
+    * :meth:`launch_app` starts the app under test through a WDA session
+      whose ``autoClickAlertSelector`` leaves WebDriverAgent answering
+      permission prompts on its own.
     * :meth:`tap` sends normalized screen taps.
 
     The agent has to be running before any of that works: this backend does
@@ -85,7 +85,7 @@ class IOSDevice6(DeviceBase):
 
     @property
     def last_launch_pid(self) -> int | None:
-        """Return the PID from the most recent successful launch, if known."""
+        """Return the PID from the most recent successful WDA launch."""
         return self._last_launch_pid
 
     @classmethod
@@ -133,18 +133,25 @@ class IOSDevice6(DeviceBase):
         args: list[str] | None = None,
         environment: dict[str, str] | None = None,
         alert_action: AlertAction | None = AlertAction.ACCEPT,
+        accept_button_labels: tuple[str, ...] | list[str] | None = None,
     ) -> None:
         """Launch an installed app through WebDriverAgent.
 
         The WDA session is left open on purpose: deleting it terminates the app
         under test on some WebDriverAgent builds. That session also carries
-        WebDriverAgent's built-in alerts monitor, so permission prompts the app
-        raises are answered on the device for as long as it lives.
+        WebDriverAgent's built-in alerts monitor, started through
+        ``autoClickAlertSelector`` after the session exists, so permission
+        prompts the app raises are answered on the device for as long as it
+        lives.
 
-        WDA does not report a PID directly, so :attr:`last_launch_pid` is
-        resolved best-effort from the WDA app list and stays ``None`` when that
-        list does not contain the launched bundle. Pass an explicit ``pid`` to
-        :meth:`capture_memgraph` in that case.
+        The monitor is pointed at the accept button by label through
+        ``accept_button_labels``. facebook-wda's ``defaultAlertAction``
+        capability does not reach WDA (it is posted outside ``alwaysMatch``),
+        so the selector is what actually starts the monitor.
+
+        A successful launch records the PID in :attr:`last_launch_pid` when
+        WDA reports one, so a following :meth:`capture_memgraph` can use it
+        without an explicit ``pid`` argument.
 
         Args:
             app_id: Bundle identifier to launch. When omitted or empty, uses
@@ -154,13 +161,19 @@ class IOSDevice6(DeviceBase):
             alert_action: How WebDriverAgent should answer alerts on its own.
                 ``None`` leaves its monitor off, which means prompts stay up
                 until something else on the device clears them.
+            accept_button_labels: Labels that count as accepting a prompt.
+                Defaults to :data:`ACCEPT_ALERT_BUTTON_LABELS`. Only used when
+                ``alert_action`` is :attr:`AlertAction.ACCEPT`.
 
         Raises:
-            ValueError: If both ``app_id`` and :attr:`package_name` are empty.
+            ValueError: If both ``app_id`` and :attr:`package_name` are empty,
+                or if a button label contains a quote or a backtick.
             AppNotInstalledError: If the resolved bundle id is not installed.
             IOSDevice6Error: If WebDriverAgent does not accept the launch.
         """
         target = self._resolve_app_id(app_id)
+        self._last_launch_pid = None
+        self._last_launch_app_id = ""
         if not self.is_installed(target):
             raise AppNotInstalledError(f"App not installed: {target}")
 
@@ -171,17 +184,13 @@ class IOSDevice6(DeviceBase):
                 args=args,
                 environment=environment,
                 alert_action=alert_action,
+                accept_button_labels=accept_button_labels,
             )
         except WDACLIError as exc:
             raise IOSDevice6Error(str(exc)) from exc
 
         self._last_launch_pid = pid
         self._last_launch_app_id = target
-        if pid is None:
-            logger.warning(
-                f"{_LOG_TAG} WDA launched {target} on {self.device_id} without "
-                "a PID; pass pid explicitly to capture_memgraph"
-            )
 
     def launch(
         self,
@@ -329,8 +338,8 @@ class IOSDevice6(DeviceBase):
 
         Args:
             output: Destination ``.memgraph`` file.
-            pid: Process id to capture. Defaults to :attr:`last_launch_pid`,
-                which a WDA launch may not have resolved.
+            pid: Process id to capture. Defaults to :attr:`last_launch_pid`
+                from the most recent successful WDA launch.
 
         Returns:
             Path: The resolved destination path.
