@@ -45,6 +45,7 @@ class RecordBase(ABC):
         self._server_port = int(server_port)
         self._device_udid = device_udid
         self._out_path = out_path
+        self._result = None
 
     @property
     def record_type(self) -> str:
@@ -65,6 +66,11 @@ class RecordBase(ABC):
     def device_udid(self) -> str:
         """Target device UDID bound to this instance."""
         return self._device_udid
+
+    @property
+    def result(self) -> dict | None:
+        """The recording result."""
+        return self._result
 
     @abstractmethod
     def health(self) -> bool:

@@ -88,6 +88,7 @@ class MacRecord(RecordBase):
         result = self.client.stop(self.device_udid, upload=upload, preset=preset)
         logger.info(f"{_LOG_TAG} stopped recording {self.device_udid}")
         logger.info(f"{_LOG_TAG} stopped recording {result}")
+        self._result = result
         return result
 
     def status(self) -> dict:
