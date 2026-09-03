@@ -45,6 +45,7 @@ class DummyDevice(DeviceBase):
         self._device_ip = device_ip
         self._platform = platform
         self._package_name = ""
+        self._ios_name = "unknown"
         logger.error(
             f"{_LOG_TAG} no device bound: {reason}; "
             f"all device operations will be no-ops"

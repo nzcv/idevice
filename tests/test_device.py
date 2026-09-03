@@ -46,6 +46,7 @@ def test_create_ios4_backend(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert isinstance(device, IOSDevice4)
     assert device.platform == "ios4"
+    assert device.ios_name == "ios4"
     assert device.package_name == "com.example.game"
     Device.reset()
 
@@ -68,6 +69,7 @@ def test_create_ios6_backend(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert isinstance(device, IOSDevice6)
     assert device.platform == "ios6"
+    assert device.ios_name == "ios6"
     assert device.package_name == "com.example.game"
     Device.reset()
 
@@ -105,6 +107,7 @@ def test_dummy_pull2_is_noop(tmp_path) -> None:
     from idevice.device.base.device import AppDataPath
 
     device = DummyDevice("unconfigured")
+    assert device.ios_name == "unknown"
     assert device.pull2(AppDataPath.Persistent, "x", tmp_path / "out") is False
 
 

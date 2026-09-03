@@ -63,6 +63,12 @@ class DeviceBase(ABC):
         self._device_ip = device_ip
         self._platform = platform
         self._package_name = package_name
+        self._ios_name = platform if str(platform).startswith("ios") else "unknown"
+
+    @property
+    def ios_name(self) -> str:
+        """iOS name bound to this instance."""
+        return self._ios_name
 
     @property
     def platform(self) -> str:
