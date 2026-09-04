@@ -115,12 +115,12 @@ class Device(metaclass=_DeviceMeta):
         """
         p = Platform.from_string(platform)
         logger.debug(f"Creating device for platform={p} device_id={device_id}")
-        if p is Platform.IOS6:
-            device: DeviceBase = IOSDevice6(
+        if sys.platform == "darwin" and (p is Platform.IOS5 or os.environ.get("GAUTO_IOS5", "0") == "1"):
+            device = IOSDevice5(
                 device_id, device_ip=device_ip, package_name=package_name
             )
-        elif sys.platform == "darwin" and (p is Platform.IOS5 or os.environ.get("GAUTO_IOS5", "0") == "1"):
-            device = IOSDevice5(
+        elif p is Platform.IOS6:
+            device: DeviceBase = IOSDevice6(
                 device_id, device_ip=device_ip, package_name=package_name
             )
         elif p is Platform.IOS4:
