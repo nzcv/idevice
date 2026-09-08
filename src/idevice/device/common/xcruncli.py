@@ -152,9 +152,10 @@ class XcrunCLI:
     """Low-level wrapper for operations exposed by CoreDevice.
 
     This class owns only CLI concerns: command construction, subprocess
-    execution, JSON parsing, and devicectl-backed state. Device policy and
-    ios4 fallback routing live in :class:`~idevice.device.ios5.device.IOSDevice5`,
-    which composes this wrapper.
+    execution, and JSON parsing. Device policy, default bundle-id resolution,
+    and launch-PID tracking live in
+    :class:`~idevice.device.ios5.device.IOSDevice5`, which composes this
+    wrapper.
 
     * ``device install app`` / ``device uninstall app`` for lifecycle.
     * ``device info apps`` for exact bundle-id checks.
@@ -172,15 +173,11 @@ class XcrunCLI:
         device_id: str,
         *,
         runner: SubprocessRunner | None = None,
-        package_name: str = "",
     ) -> None:
         if not device_id or not isinstance(device_id, str):
             raise ValueError("device_id is required and must be a non-empty string")
         self.device_id = device_id
-        self.package_name = package_name
         self.runner = runner or SubprocessRunner()
-        self.last_launch_pid: int | None = None
-        self.last_launch_app_id = ""
         self._capture_screenshot_supported: bool | None = None
 
     @classmethod
@@ -221,13 +218,6 @@ class XcrunCLI:
             f"{_LOG_TAG} No USB-attached device was found; connect one by cable "
             "or pass an explicit UDID"
         )
-
-    def _resolve_app_id(self, app_id: str | None) -> str:
-        """Return an explicit app id or the default bound to this wrapper."""
-        target = app_id or self.package_name
-        if not target:
-            raise ValueError("app_id is required and must be a non-empty string")
-        return target
 
     @staticmethod
     def resolve_binary() -> str | None:
@@ -364,15 +354,16 @@ class XcrunCLI:
 
     def _launch_process(
         self,
-        app_id: str | None,
+        app_id: str,
         *,
         args: list[str] | None,
         environment: dict[str, str] | None,
         terminate_existing: bool,
         activate: bool,
-    ) -> tuple[str, int]:
-        """Launch an app and return its resolved bundle id and process id."""
-        target = self._resolve_app_id(app_id)
+    ) -> int:
+        """Launch an app and return its process id."""
+        if not app_id:
+            raise ValueError("app_id is required and must be a non-empty string")
         options: list[str] = ["--activate" if activate else "--no-activate"]
         if terminate_existing:
             options.append("--terminate-existing")
@@ -382,99 +373,98 @@ class XcrunCLI:
             )
         launch_arguments = self.validate_launch_arguments(args or [])
 
-        logger.info(f"{_LOG_TAG} Launching {target} on {self.device_id}")
+        logger.info(f"{_LOG_TAG} Launching {app_id} on {self.device_id}")
         outcome = self.run(
             self.command(
                 ["device", "process", "launch"],
                 *options,
                 "--",
-                target,
+                app_id,
                 *launch_arguments,
             )
         )
-        result = self.require(outcome, f"launch of {target}")
+        result = self.require(outcome, f"launch of {app_id}")
         process = result.get("process")
         pid = process.get("processIdentifier") if isinstance(process, dict) else None
         if not isinstance(pid, int):
             raise XcrunCLIError(
-                f"{_LOG_TAG} Launch of {target} returned no PID: {result!r}"
+                f"{_LOG_TAG} Launch of {app_id} returned no PID: {result!r}"
             )
-        logger.info(f"{_LOG_TAG} Launched {target} on {self.device_id} with PID {pid}")
-        return target, pid
+        logger.info(f"{_LOG_TAG} Launched {app_id} on {self.device_id} with PID {pid}")
+        return pid
 
     def launch(
         self,
-        app_id: str | None = None,
+        app_id: str,
         *,
         args: list[str] | None = None,
         environment: dict[str, str] | None = None,
         terminate_existing: bool = True,
         activate: bool = True,
-    ) -> None:
+    ) -> int:
         """Launch an installed app with optional environment and ``argv``.
 
         Args:
-            app_id: Bundle identifier to launch. When omitted or empty, uses
-                the bound :attr:`package_name`.
+            app_id: Bundle identifier to launch.
             args: Ordered command-line arguments passed to the app process.
             environment: Environment variables injected before process start.
             terminate_existing: Kill a running instance before launching.
             activate: Bring the app to the foreground.
 
+        Returns:
+            int: The process id reported by ``device process launch``.
+
         Raises:
-            ValueError: If both ``app_id`` and :attr:`package_name` are empty.
-            AppNotInstalledError: If the resolved bundle id is not installed.
+            ValueError: If ``app_id`` is empty.
             XcrunCLIError: If the device is unreachable, the launch fails, or
                 no PID comes back.
         """
-        target, pid = self._launch_process(
+        return self._launch_process(
             app_id,
             args=args,
             environment=environment,
             terminate_existing=terminate_existing,
             activate=activate,
         )
-        if not app_id:
-            self.last_launch_pid = pid
-            self.last_launch_app_id = target
 
     def launch_app(
         self,
-        app_id: str | None = None,
+        app_id: str,
         *,
         args: list[str] | None = None,
         environment: dict[str, str] | None = None,
         terminate_existing: bool = True,
         activate: bool = True,
-    ) -> None:
+    ) -> int:
         """Launch an installed app with optional environment and ``argv``.
 
         Args:
-            app_id: Bundle identifier to launch. When omitted or empty, uses
-                the bound :attr:`package_name`.
+            app_id: Bundle identifier to launch.
             args: Ordered command-line arguments passed to the app process.
             environment: Environment variables injected before process start.
             terminate_existing: Kill a running instance before launching.
             activate: Bring the app to the foreground.
 
+        Returns:
+            int: The process id reported by ``device process launch``.
+
         Raises:
-            ValueError: If both ``app_id`` and :attr:`package_name` are empty.
-            AppNotInstalledError: If the resolved bundle id is not installed.
+            ValueError: If ``app_id`` is empty.
+            AppNotInstalledError: If the bundle id is not installed.
             XcrunCLIError: If the device is unreachable, the launch fails, or
                 no PID comes back.
         """
-        target = self._resolve_app_id(app_id)
-        if self._app_record(target, strict=True) is None:
-            raise AppNotInstalledError(f"App not installed: {target}")
-        target, pid = self._launch_process(
-            target,
+        if not app_id:
+            raise ValueError("app_id is required and must be a non-empty string")
+        if self._app_record(app_id, strict=True) is None:
+            raise AppNotInstalledError(f"App not installed: {app_id}")
+        return self._launch_process(
+            app_id,
             args=args,
             environment=environment,
             terminate_existing=terminate_existing,
             activate=activate,
         )
-        self.last_launch_pid = pid
-        self.last_launch_app_id = target
 
     def _processes(self) -> list[dict[str, Any]]:
         """Return the device process table.
@@ -519,26 +509,25 @@ class XcrunCLI:
         self.require(outcome, f"terminate PID {pid}")
         return True
 
-    def stop_app(self, app_id: str | None = None) -> None:
+    def stop_app(self, app_id: str) -> None:
         """Kill every process of the app, whoever launched it.
 
         A stopped app is not an error; a missing app is.
 
         Raises:
-            AppNotInstalledError: If the resolved bundle id is not installed.
+            ValueError: If ``app_id`` is empty.
+            AppNotInstalledError: If the bundle id is not installed.
             XcrunCLIError: If the device is unreachable.
         """
-        target = self._resolve_app_id(app_id)
-        record = self._app_record(target, strict=True)
+        if not app_id:
+            raise ValueError("app_id is required and must be a non-empty string")
+        record = self._app_record(app_id, strict=True)
         if record is None:
-            raise AppNotInstalledError(f"App not installed: {target}")
+            raise AppNotInstalledError(f"App not installed: {app_id}")
 
-        logger.info(f"{_LOG_TAG} Stopping app on iOS device {self.device_id}: {target}")
+        logger.info(f"{_LOG_TAG} Stopping app on iOS device {self.device_id}: {app_id}")
         for pid in self._bundle_process_ids(str(record.get("url") or "")):
             self._terminate(pid)
-        if self.last_launch_app_id == target:
-            self.last_launch_pid = None
-            self.last_launch_app_id = ""
 
     def _supports_capture_screenshot(self) -> bool:
         """Return whether this Xcode ships ``device capture``, added in Xcode 27.
@@ -636,7 +625,7 @@ class XcrunCLI:
         local: Path | str,
         remote: str,
         *,
-        app_id: str | None = None,
+        app_id: str,
         documents_only: bool = False,
         remove_existing_content: bool = False,
     ) -> None:
@@ -645,21 +634,22 @@ class XcrunCLI:
         Args:
             local: Path to the local file or directory.
             remote: Destination path relative to the selected container scope.
-            app_id: Bundle id, defaulting to the id bound to this device.
+            app_id: Bundle identifier that owns the container.
             documents_only: Scope ``remote`` to the app's Documents directory.
             remove_existing_content: Remove the destination directory's
                 existing contents before copying ``local``. CoreDevice only
                 applies this option when ``local`` is a directory.
 
         Raises:
-            ValueError: If ``remote`` is empty.
+            ValueError: If ``app_id`` or ``remote`` is empty.
             FileNotFoundError: If ``local`` does not exist.
             XcrunCLIError: If devicectl rejects the transfer.
         """
+        if not app_id:
+            raise ValueError("app_id is required and must be a non-empty string")
         local_path = Path(local)
         if not local_path.exists():
             raise FileNotFoundError(f"Local path not found: {local_path}")
-        target = self._resolve_app_id(app_id)
         destination = self._container_path(remote, documents_only=documents_only)
         replacement = (
             ["--remove-existing-content", "true"]
@@ -669,7 +659,7 @@ class XcrunCLI:
         outcome = self.run(
             self.command(
                 ["device", "copy", "to"],
-                *self._container_arguments(target),
+                *self._container_arguments(app_id),
                 "--source",
                 str(local_path),
                 "--destination",
@@ -678,30 +668,31 @@ class XcrunCLI:
             ),
             timeout=_INSTALL_TIMEOUT,
         )
-        self.require(outcome, f"push to {target}:{destination}")
+        self.require(outcome, f"push to {app_id}:{destination}")
 
     def pull(
         self,
         remote: str,
         local: Path | str,
         *,
-        app_id: str | None = None,
+        app_id: str,
         documents_only: bool = True,
     ) -> None:
         """Copy a file or directory out of the app data container.
 
         Raises:
-            ValueError: If ``remote`` is empty.
+            ValueError: If ``app_id`` or ``remote`` is empty.
             XcrunCLIError: If devicectl rejects the transfer.
         """
-        target = self._resolve_app_id(app_id)
+        if not app_id:
+            raise ValueError("app_id is required and must be a non-empty string")
         source = self._container_path(remote, documents_only=documents_only)
         local_path = Path(local)
         local_path.parent.mkdir(parents=True, exist_ok=True)
         outcome = self.run(
             self.command(
                 ["device", "copy", "from"],
-                *self._container_arguments(target),
+                *self._container_arguments(app_id),
                 "--source",
                 source,
                 "--destination",
@@ -709,7 +700,7 @@ class XcrunCLI:
             ),
             timeout=_INSTALL_TIMEOUT,
         )
-        self.require(outcome, f"pull from {target}:{source}")
+        self.require(outcome, f"pull from {app_id}:{source}")
 
     @staticmethod
     def _file_names(result: dict[str, Any]) -> list[str]:
@@ -769,7 +760,7 @@ class XcrunCLI:
         self,
         remote: str,
         *,
-        app_id: str | None = None,
+        app_id: str,
         recursive: bool = False,
         documents_only: bool = True,
     ) -> list[str]:
@@ -780,14 +771,15 @@ class XcrunCLI:
         ``/`` and ``.`` select the root of the chosen scope.
 
         Raises:
-            ValueError: If ``remote`` is empty.
+            ValueError: If ``app_id`` or ``remote`` is empty.
             XcrunCLIError: If the directory cannot be listed.
         """
-        target = self._resolve_app_id(app_id)
+        if not app_id:
+            raise ValueError("app_id is required and must be a non-empty string")
         if not remote or not isinstance(remote, str):
             raise ValueError("remote is required and must be a non-empty string")
         names = self._list_container(
-            target, remote, documents_only=documents_only, recursive=recursive
+            app_id, remote, documents_only=documents_only, recursive=recursive
         )
         return names
 

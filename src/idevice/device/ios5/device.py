@@ -64,22 +64,20 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
             payload_name=payload_name,
         )
         runner = SubprocessRunner()
-        self._xcruncli = XcrunCLI(
-            device_id,
-            runner=runner,
-            package_name=package_name,
-        )
+        self._xcruncli = XcrunCLI(device_id, runner=runner)
         self._app_cache = InstalledAppCache(device_id, cache_dir=cache_dir)
         self._ios4cli = IOS4CLI(
             device_id,
             binary=ios4_binary(),
             runner=runner,
         )
+        self._last_launch_pid: int | None = None
+        self._last_launch_app_id = ""
 
     @property
     def last_launch_pid(self) -> int | None:
         """Return the PID from the most recent successful launch."""
-        return self._xcruncli.last_launch_pid
+        return self._last_launch_pid
 
     @classmethod
     def from_env(cls) -> IOSDevice5:
@@ -196,6 +194,8 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
         activate: bool,
         check_installed: bool,
     ) -> None:
+        target = self._resolve_app_id(app_id)
+        record_pid = check_installed or not app_id
         operation = "launch_app" if check_installed else "launch"
         launch = (
             self._xcruncli.launch_app
@@ -203,8 +203,8 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
             else self._xcruncli.launch
         )
         try:
-            launch(
-                app_id,
+            pid = launch(
+                target,
                 args=args,
                 environment=environment,
                 terminate_existing=terminate_existing,
@@ -212,22 +212,32 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
             )
         except _DEVICETCL_FAILURES as exc:
             self._log_fallback(operation, exc)
-            self._ios4cli.launch_app(
-                self._resolve_app_id(app_id), args=args, environment=environment
-            )
-            self._sync_ios4_launch()
+            self._ios4cli.launch_app(target, args=args, environment=environment)
+            if record_pid:
+                self._sync_ios4_launch()
+            return
+        if record_pid:
+            self._last_launch_pid = pid
+            self._last_launch_app_id = target
 
     def _sync_ios4_launch(self) -> None:
-        self._xcruncli.last_launch_pid = self._ios4cli.last_launch_pid
-        self._xcruncli.last_launch_app_id = self._ios4cli.last_launch_app_id
+        self._last_launch_pid = self._ios4cli.last_launch_pid
+        self._last_launch_app_id = self._ios4cli.last_launch_app_id
+
+    def _clear_last_launch(self, app_id: str) -> None:
+        """Clear launch tracking when it belongs to ``app_id``."""
+        if self._last_launch_app_id == app_id:
+            self._last_launch_pid = None
+            self._last_launch_app_id = ""
 
     def stop_app(self, app_id: str | None = None) -> None:
+        target = self._resolve_app_id(app_id)
         try:
-            self._xcruncli.stop_app(app_id)
+            self._xcruncli.stop_app(target)
         except _DEVICETCL_FAILURES as exc:
             self._log_fallback("stop_app", exc)
-            self._ios4cli.stop_app(self._resolve_app_id(app_id))
-            self._sync_ios4_launch()
+            self._ios4cli.stop_app(target)
+        self._clear_last_launch(target)
 
     def get_installed_pkg_name(self, app_id: str) -> InstalledAppInfo | None:
         try:
@@ -262,11 +272,12 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
         documents_only: bool = False,
         remove_existing_content: bool = False,
     ) -> None:
+        target = self._resolve_app_id(app_id)
         try:
             self._xcruncli.push(
                 local,
                 remote,
-                app_id=app_id,
+                app_id=target,
                 documents_only=documents_only,
                 remove_existing_content=remove_existing_content,
             )
@@ -275,10 +286,9 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
             self._log_fallback("push", exc)
             if not documents_only:
                 self._ios4cli.push(
-                    local, remote, app_id=app_id, documents_only=False
+                    local, remote, app_id=target, documents_only=False
                 )
                 return
-            target = self._resolve_app_id(app_id)
             if not self._ios4cli.documents_push(target, local, remote):
                 raise IOS4CLIError(f"ios4 push failed for {target}:{remote}")
 
@@ -290,11 +300,12 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
         app_id: str | None = None,
         documents_only: bool = True,
     ) -> None:
+        target = self._resolve_app_id(app_id)
         try:
             self._xcruncli.pull(
                 remote,
                 local,
-                app_id=app_id,
+                app_id=target,
                 documents_only=documents_only,
             )
             return
@@ -302,10 +313,9 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
             self._log_fallback("pull", exc)
             if not documents_only:
                 self._ios4cli.pull(
-                    remote, local, app_id=app_id, documents_only=False
+                    remote, local, app_id=target, documents_only=False
                 )
                 return
-            target = self._resolve_app_id(app_id)
             if not self._ios4cli.documents_pull(target, remote, local):
                 raise IOS4CLIError(f"ios4 pull failed for {target}:{remote}")
 
@@ -317,10 +327,11 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
         recursive: bool = False,
         documents_only: bool = True,
     ) -> list[str]:
+        target = self._resolve_app_id(app_id)
         try:
             return self._xcruncli.ls(
                 remote,
-                app_id=app_id,
+                app_id=target,
                 recursive=recursive,
                 documents_only=documents_only,
             )
@@ -328,11 +339,9 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
             self._log_fallback("ls", exc)
             if not documents_only or recursive:
                 return self._ios4cli.ls(
-                    remote, app_id=app_id, recursive=recursive
+                    remote, app_id=target, recursive=recursive
                 )
-            return self._ios4cli.documents_ls(
-                self._resolve_app_id(app_id), remote
-            )
+            return self._ios4cli.documents_ls(target, remote)
 
     def documents_exists(self, app_id: str, remote: str) -> bool:
         try:
@@ -390,6 +399,7 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
             self._xcruncli.pull(
                 remote,
                 local,
+                app_id=self._resolve_app_id(None),
                 documents_only=data_path is AppDataPath.Persistent,
             )
             return True

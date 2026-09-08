@@ -860,7 +860,7 @@ def test_screenshot_uses_devicectl_capture_when_available(
 def test_capture_memgraph_delegates_to_the_ios4_cli(
     ios5_device: IOSDevice5, tmp_path: Path
 ) -> None:
-    ios5_device._xcruncli.last_launch_pid = 4815
+    ios5_device._last_launch_pid = 4815
     destination = tmp_path / "game.memgraph"
 
     def fake_run(command: list[str], **kwargs: Any) -> CommandResult:
@@ -879,7 +879,7 @@ def test_capture_memgraph_delegates_to_the_ios4_cli(
 def test_capture_memgraph_propagates_a_missing_ios4_command(
     ios5_device: IOSDevice5, tmp_path: Path
 ) -> None:
-    ios5_device._xcruncli.last_launch_pid = 4815
+    ios5_device._last_launch_pid = 4815
     ios5_device._xcruncli.runner.run.side_effect = CommandExecutionError(
         "ios4 missing"
     )
