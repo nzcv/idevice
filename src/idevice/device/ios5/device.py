@@ -19,7 +19,7 @@ from idevice.device.common.xcruncli import (
 )
 from idevice.device.config import device_id as env_device_id
 from idevice.device.config import device_ip as env_device_ip
-from idevice.device.config import ios4_binary, xcrun_binary
+from idevice.device.config import ios4_binary
 from idevice.device.config import package_name as env_package_name
 from idevice.device.config import payload_name as env_payload_name
 
@@ -51,12 +51,10 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
                 f"{_LOG_TAG} devicectl is only available on macOS with Xcode "
                 f"installed; this host is {sys.platform}"
             )
-        configured_xcrun = xcrun_binary()
-        if XcrunCLI.resolve_binary(configured_xcrun) is None:
-            logger.error(f"{_LOG_TAG} `{configured_xcrun}` CLI not found")
+        if XcrunCLI.resolve_binary() is None:
+            logger.error(f"{_LOG_TAG} `xcrun` CLI not found")
             raise IOSDevice5Error(
-                f"`{configured_xcrun}` CLI not found. Install Xcode, or set "
-                "IDEVICE_XCRUN_BINARY."
+                "`xcrun` CLI not found. Install Xcode."
             )
         super().__init__(
             device_id,
@@ -68,7 +66,6 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
         runner = SubprocessRunner()
         self._xcruncli = XcrunCLI(
             device_id,
-            binary=configured_xcrun,
             runner=runner,
             package_name=package_name,
         )
@@ -98,9 +95,7 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
     def default_udid(cls) -> str:
         """Return the first wired device, falling back to ios4 listing."""
         try:
-            return XcrunCLI.default_udid(
-                binary=xcrun_binary(), runner=SubprocessRunner()
-            )
+            return XcrunCLI.default_udid()
         except DeviceNotFoundError as xcrun_error:
             try:
                 return IOS4CLI.default_udid()

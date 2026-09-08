@@ -29,11 +29,6 @@ def ios4_binary() -> str:
     return os.environ.get("IDEVICE_IOS4_BINARY", default)
 
 
-def xcrun_binary() -> str:
-    """Return the ``xcrun`` CLI path used to reach Apple's ``devicectl``."""
-    return os.environ.get("IDEVICE_XCRUN_BINARY", "xcrun")
-
-
 def ideviceinstaller_binary() -> str:
     """Return the standalone libimobiledevice ``ideviceinstaller`` CLI path."""
     default = (

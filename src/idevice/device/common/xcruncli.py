@@ -17,11 +17,11 @@ from idevice.device.base.errors import (
     DeviceNotFoundError,
 )
 from idevice.device.base.runner import SubprocessRunner
-from idevice.device.config import xcrun_binary
 
 logger = logging.getLogger(__name__)
 
-_LOG_TAG = "[IOSDevice5]"
+_LOG_TAG = "[XcrunCLI]"
+_XCRUN_BINARY = "xcrun"
 _APP_DATA_DOMAIN = "appDataContainer"
 _WIRED_TRANSPORT = "wired"
 _DOCUMENTS_ROOT = "Documents"
@@ -96,7 +96,6 @@ def _read_document(json_path: Path) -> dict[str, Any]:
 
 
 def _run_devicectl(
-    xcrun: str,
     runner: SubprocessRunner,
     arguments: list[str],
     *,
@@ -120,7 +119,7 @@ def _run_devicectl(
     except ValueError:
         separator_index = len(arguments)
     command = [
-        xcrun,
+        _XCRUN_BINARY,
         "devicectl",
         *arguments[:separator_index],
         "--quiet",
@@ -172,7 +171,6 @@ class XcrunCLI:
         self,
         device_id: str,
         *,
-        binary: str | None = None,
         runner: SubprocessRunner | None = None,
         package_name: str = "",
     ) -> None:
@@ -180,7 +178,6 @@ class XcrunCLI:
             raise ValueError("device_id is required and must be a non-empty string")
         self.device_id = device_id
         self.package_name = package_name
-        self.binary = binary or xcrun_binary()
         self.runner = runner or SubprocessRunner()
         self.last_launch_pid: int | None = None
         self.last_launch_app_id = ""
@@ -190,7 +187,6 @@ class XcrunCLI:
     def default_udid(
         cls,
         *,
-        binary: str | None = None,
         runner: SubprocessRunner | None = None,
     ) -> str:
         """Return the UDID of the first USB-attached device, in listing order.
@@ -204,7 +200,6 @@ class XcrunCLI:
             DeviceNotFoundError: If no USB-attached device reports a UDID.
         """
         outcome = _run_devicectl(
-            binary or xcrun_binary(),
             runner or SubprocessRunner(),
             ["list", "devices"],
             timeout=30,
@@ -235,12 +230,9 @@ class XcrunCLI:
         return target
 
     @staticmethod
-    def resolve_binary(binary: str) -> str | None:
-        """Return the usable path for ``binary``, or ``None`` when missing."""
-        resolved = shutil.which(binary)
-        if resolved is not None:
-            return resolved
-        return binary if Path(binary).is_file() else None
+    def resolve_binary() -> str | None:
+        """Return the usable path for ``xcrun``, or ``None`` when missing."""
+        return shutil.which(_XCRUN_BINARY)
 
     def command(self, subcommand: list[str], *arguments: str) -> list[str]:
         """Build a devicectl argument list bound to this device."""
@@ -250,9 +242,7 @@ class XcrunCLI:
         self, arguments: list[str], *, timeout: int = _DEFAULT_TIMEOUT
     ) -> DevicectlOutcome:
         """Run one devicectl command for this device."""
-        return _run_devicectl(
-            self.binary, self.runner, arguments, timeout=timeout
-        )
+        return _run_devicectl(self.runner, arguments, timeout=timeout)
 
     def require(
         self, outcome: DevicectlOutcome, action: str
@@ -558,7 +548,7 @@ class XcrunCLI:
         """
         if self._capture_screenshot_supported is None:
             result = self.runner.run(
-                [self.binary, "devicectl", "device", "--help"],
+                [_XCRUN_BINARY, "devicectl", "device", "--help"],
                 check=False,
                 timeout=30,
             )

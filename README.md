@@ -26,7 +26,7 @@ macOS and HarmonyOS are not implemented yet.
   - **iOS (go-ios):** `ios`
   - **iOS (pymobiledevice3):** `pymobiledevice3` (default: `/opt/ios3/bin/pymobiledevice3` on Unix, `~/ios3/bin/pymobiledevice3.exe` on Windows)
   - **iOS (ios4):** `ios4` (or set `IDEVICE_IOS4_BINARY`); optionally `ideviceinstaller` for installs (or set `IDEVICE_IDEVICEINSTALLER_BINARY`)
-  - **iOS (devicectl):** `xcrun` from Xcode, macOS only (or set `IDEVICE_XCRUN_BINARY`); `ios4` is still needed for `capture_memgraph` and `documents_rm`
+  - **iOS (devicectl):** `xcrun` from Xcode, macOS only; `ios4` is still needed for `capture_memgraph` and `documents_rm`
   - **Android:** `adb`
 
 Python packages `pymobiledevice3` and `uiautomator2` are installed automatically with the project (see [Install](#install)). `IOSDevice3` uses the pymobiledevice3 Python library for Documents sandbox access (`documents_*`); other iOS operations go through the CLI.
@@ -338,7 +338,6 @@ Environment variables override default binary paths:
 | `IDEVICE_IOS3_BINARY` | `/opt/ios3/bin/pymobiledevice3` (Unix) / `~/ios3/bin/pymobiledevice3.exe` (Windows) | `IOSDevice3` |
 | `IDEVICE_IOS4_BINARY` | `ios4` (`ios4.exe` on Windows) | `IOSDevice4`, `IOSDevice5.capture_memgraph`, `IOSDevice5.documents_rm` |
 | `IDEVICE_IDEVICEINSTALLER_BINARY` | `ideviceinstaller` (`ideviceinstaller.exe` on Windows) | `IOSDevice4.install` (falls back to `ios4` when missing) |
-| `IDEVICE_XCRUN_BINARY` | `xcrun` | `IOSDevice5` |
 | `IDEVICE_ADB_BINARY` | `adb` | `AndroidDevice`, `AndroidUIAuto` |
 | `IDEVICE_POWERSHELL_BINARY` | `powershell` | `WindowsDevice` |
 
