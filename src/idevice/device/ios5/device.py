@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from idevice.device.base.device import AppDataPath, DeviceBase
@@ -159,11 +160,12 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
     ) -> None:
         self._launch_with_fallback(
             app_id,
+            launch=self._xcruncli.launch,
             args=args,
             environment=environment,
             terminate_existing=terminate_existing,
             activate=activate,
-            check_installed=False,
+            record_pid=not app_id,
         )
 
     def launch_app(
@@ -177,31 +179,26 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
     ) -> None:
         self._launch_with_fallback(
             app_id,
+            launch=self._xcruncli.launch_app,
             args=args,
             environment=environment or None,
             terminate_existing=terminate_existing,
             activate=activate,
-            check_installed=True,
+            record_pid=True,
         )
 
     def _launch_with_fallback(
         self,
         app_id: str | None,
         *,
+        launch: Callable[..., int],
         args: list[str] | None,
         environment: dict[str, str] | None,
         terminate_existing: bool,
         activate: bool,
-        check_installed: bool,
+        record_pid: bool,
     ) -> None:
         target = self._resolve_app_id(app_id)
-        record_pid = check_installed or not app_id
-        operation = "launch_app" if check_installed else "launch"
-        launch = (
-            self._xcruncli.launch_app
-            if check_installed
-            else self._xcruncli.launch
-        )
         try:
             pid = launch(
                 target,
@@ -211,18 +208,13 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
                 activate=activate,
             )
         except _DEVICETCL_FAILURES as exc:
-            self._log_fallback(operation, exc)
-            self._ios4cli.launch_app(target, args=args, environment=environment)
-            if record_pid:
-                self._sync_ios4_launch()
-            return
+            self._log_fallback(getattr(launch, "__name__", "launch"), exc)
+            pid = self._ios4cli.launch_app(
+                target, args=args, environment=environment
+            )
         if record_pid:
             self._last_launch_pid = pid
             self._last_launch_app_id = target
-
-    def _sync_ios4_launch(self) -> None:
-        self._last_launch_pid = self._ios4cli.last_launch_pid
-        self._last_launch_app_id = self._ios4cli.last_launch_app_id
 
     def _clear_last_launch(self, app_id: str) -> None:
         """Clear launch tracking when it belongs to ``app_id``."""

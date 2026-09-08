@@ -47,7 +47,8 @@ class IOS4CLI:
     """Low-level ios4 CLI implementation shared by IOSDevice4 and IOSDevice5.
 
     This class owns only CLI concerns: command construction, subprocess
-    execution, output parsing, and ios4-backed state.
+    execution, and output parsing. Launch-PID tracking lives on the device
+    facades that compose this wrapper.
     """
 
     def __init__(
@@ -62,8 +63,6 @@ class IOS4CLI:
         self.device_id = device_id
         self.binary = binary or ios4_binary()
         self.runner = runner or SubprocessRunner()
-        self.last_launch_pid: int | None = None
-        self.last_launch_app_id = ""
 
     @staticmethod
     def resolve_binary(binary: str) -> str | None:
@@ -196,8 +195,12 @@ class IOS4CLI:
         *,
         args: list[str] | None = None,
         environment: dict[str, str] | None = None,
-    ) -> None:
-        """Launch an app directly through ``process_control``."""
+    ) -> int:
+        """Launch an app directly through ``process_control``.
+
+        Returns:
+            int: The process id reported by ``process_control``.
+        """
         if not self.is_installed(app_id):
             raise AppNotInstalledError(f"App not installed: {app_id}")
         command = self.command("process_control")
@@ -213,8 +216,7 @@ class IOS4CLI:
                 f"{_LOG_TAG} process_control did not return a PID for {app_id}: "
                 f"stdout={result.stdout!r}, stderr={result.stderr!r}"
             )
-        self.last_launch_pid = int(match.group(1))
-        self.last_launch_app_id = app_id
+        return int(match.group(1))
 
     def launch(self, app_id: str) -> None:
         """Launch an app without launch arguments."""
@@ -229,9 +231,6 @@ class IOS4CLI:
                 f"returncode={result.returncode}, stdout={result.stdout!r}, "
                 f"stderr={result.stderr!r}"
             )
-        if self.last_launch_app_id == app_id:
-            self.last_launch_pid = None
-            self.last_launch_app_id = ""
 
     def screenshot(self, local: Path | str) -> bool:
         """Capture atomically through the ios4 screenshot service."""
@@ -268,7 +267,7 @@ class IOS4CLI:
         self, output: Path | str, *, pid: int | None = None
     ) -> Path:
         """Capture a memory graph through ios4's DVT service."""
-        target_pid = self.last_launch_pid if pid is None else pid
+        target_pid = pid
         if target_pid is None:
             raise IOS4CLIError(
                 f"{_LOG_TAG} No PID available; launch the app or pass pid explicitly"

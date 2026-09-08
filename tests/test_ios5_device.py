@@ -476,8 +476,7 @@ def test_launch_app_falls_back_to_ios4(ios5_device: IOSDevice5) -> None:
         return_value=outcome(returncode=1, error="device offline")
     )
     ios4cli = MagicMock()
-    ios4cli.last_launch_pid = 912
-    ios4cli.last_launch_app_id = APP_ID
+    ios4cli.launch_app.return_value = 912
     ios5_device._ios4cli = ios4cli
 
     ios5_device.launch_app(APP_ID, args=["--debug"], environment={"MODE": "test"})
@@ -495,8 +494,7 @@ def test_launch_app_fallback_normalizes_an_empty_environment(
         side_effect=IOSDevice5Error("device offline")
     )
     ios4cli = MagicMock()
-    ios4cli.last_launch_pid = 912
-    ios4cli.last_launch_app_id = APP_ID
+    ios4cli.launch_app.return_value = 912
     ios5_device._ios4cli = ios4cli
 
     ios5_device.launch_app(APP_ID, environment={})
