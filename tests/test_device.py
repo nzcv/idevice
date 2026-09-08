@@ -25,8 +25,10 @@ def test_create_binds_package_name(monkeypatch: pytest.MonkeyPatch) -> None:
         device_id="emulator-5554",
         device_ip="",
         package_name="com.example.app",
+        payload_name="payload.apk",
     )
     assert device.package_name == "com.example.app"
+    assert device.payload_name == "payload.apk"
     Device.reset()
 
 
@@ -42,12 +44,14 @@ def test_create_ios4_backend(monkeypatch: pytest.MonkeyPatch) -> None:
         device_id="00000000-0000000000000000",
         device_ip="",
         package_name="com.example.game",
+        payload_name="com.example.payload",
     )
 
     assert isinstance(device, IOSDevice4)
     assert device.platform == "ios4"
     assert device.ios_name == "ios4"
     assert device.package_name == "com.example.game"
+    assert device.payload_name == "com.example.payload"
     Device.reset()
 
 
@@ -65,12 +69,29 @@ def test_create_ios6_backend(monkeypatch: pytest.MonkeyPatch) -> None:
         device_id="00000000-0000000000000000",
         device_ip="192.0.2.60",
         package_name="com.example.game",
+        payload_name="com.example.payload",
     )
 
     assert isinstance(device, IOSDevice6)
     assert device.platform == "ios6"
     assert device.ios_name == "ios6"
     assert device.package_name == "com.example.game"
+    assert device.payload_name == "com.example.payload"
+    Device.reset()
+
+
+def test_create_windows_binds_payload_name() -> None:
+    Device.reset()
+    device = Device.create(
+        "pc",
+        device_id="local",
+        device_ip="",
+        company_name="Acme",
+        package_name="Game.exe",
+        payload_name="Game.zip",
+    )
+    assert device.package_name == "Game.exe"
+    assert device.payload_name == "Game.zip"
     Device.reset()
 
 
@@ -87,6 +108,30 @@ def test_from_env_windows_requires_company_and_package(
 
     assert isinstance(device, DummyDevice)
     Device.reset()
+
+
+def test_from_env_binds_payload_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    Device.reset()
+    monkeypatch.setattr(
+        "idevice.device.android.device.shutil.which", lambda _name: "adb"
+    )
+    monkeypatch.setenv("GAUTO_PLATFORM", "android")
+    monkeypatch.setenv("GAUTO_DEVICE_UDID", "emulator-5554")
+    monkeypatch.setenv("GAUTO_PACKAGE_NAME", "com.example.app")
+    monkeypatch.setenv("GAUTO_PAYLOAD_NAME", "payload.apk")
+
+    device = Device.from_env()
+
+    assert device.package_name == "com.example.app"
+    assert device.payload_name == "payload.apk"
+    Device.reset()
+
+
+def test_dummy_payload_name_is_empty() -> None:
+    device = DummyDevice("unconfigured")
+    assert device.payload_name == ""
 
 
 def test_from_env_requires_package_name_for_android(

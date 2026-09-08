@@ -92,6 +92,7 @@ class Device(metaclass=_DeviceMeta):
         device_ip: str,
         company_name: str = "",
         package_name: str = "",
+        payload_name: str = "",
     ) -> DeviceBase:
         """Create a device instance bound to ``device_id`` for ``platform``.
 
@@ -106,7 +107,9 @@ class Device(metaclass=_DeviceMeta):
                 bound on the device. Used by :meth:`DeviceBase.stop_app` when
                 ``app_id`` is omitted. On Windows also used to resolve the
                 documents sandbox root.
-
+            payload_name: Optional payload identifier (bundle id / package
+                name / exe name) bound on the device, distinct from
+                ``package_name``. Exposed as :attr:`DeviceBase.payload_name`.
         Returns:
             DeviceBase: The platform-specific device implementation.
 
@@ -117,27 +120,30 @@ class Device(metaclass=_DeviceMeta):
         logger.debug(f"Creating device for platform={p} device_id={device_id}")
         if sys.platform == "darwin" and (p is Platform.IOS5 or os.environ.get("GAUTO_IOS5", "0") == "1"):
             device = IOSDevice5(
-                device_id, device_ip=device_ip, package_name=package_name
+                device_id, device_ip=device_ip, package_name=package_name, payload_name=payload_name
             )
         elif p is Platform.IOS6:
             device: DeviceBase = IOSDevice6(
-                device_id, device_ip=device_ip, package_name=package_name
+                device_id, device_ip=device_ip, package_name=package_name, payload_name=payload_name
             )
         elif p is Platform.IOS4:
             device = IOSDevice4(
-                device_id, device_ip=device_ip, package_name=package_name
+                device_id, device_ip=device_ip, package_name=package_name, payload_name=payload_name
             )
         elif p is Platform.IOS:
             device = IOSDevice(
-                device_id, device_ip=device_ip, package_name=package_name
+                device_id, device_ip=device_ip, package_name=package_name, payload_name=payload_name
             )
         elif p is Platform.IOS3:
             device = IOSDevice3(
-                device_id, device_ip=device_ip, package_name=package_name
+                device_id, device_ip=device_ip, package_name=package_name, payload_name=payload_name
             )
         elif p is Platform.ANDROID:
             device = AndroidDevice(
-                device_id, device_ip=device_ip, package_name=package_name
+                device_id,
+                device_ip=device_ip,
+                package_name=package_name,
+                payload_name=payload_name,
             )
         elif p is Platform.WINDOWS:
             device = WindowsDevice(
@@ -145,6 +151,7 @@ class Device(metaclass=_DeviceMeta):
                 device_ip=device_ip,
                 company_name=company_name,
                 package_name=package_name,
+                payload_name=payload_name,
             )
         else:
             raise ValueError(f"Unsupported platform: {platform}")
@@ -157,7 +164,8 @@ class Device(metaclass=_DeviceMeta):
         """Build a device from the ``GAUTO_*`` environment variables.
 
         Reads ``GAUTO_PLATFORM``, ``GAUTO_DEVICE_UDID``, ``GAUTO_DEVICE_IP``,
-        ``GAUTO_PACKAGE_NAME``, and on Windows also ``GAUTO_COMPANY_NAME``.
+        ``GAUTO_PACKAGE_NAME``, ``GAUTO_PAYLOAD_NAME``, and on Windows also
+        ``GAUTO_COMPANY_NAME``.
 
         Unlike :meth:`create`, this never raises on a missing/blank environment:
         when required ``GAUTO_*`` variables are empty (or the platform is
@@ -176,6 +184,7 @@ class Device(metaclass=_DeviceMeta):
         device_ip = config.device_ip()
         company_name = config.company_name()
         package_name = config.package_name()
+        payload_name = config.payload_name()
         required_env: list[tuple[str, str]] = [
             ("GAUTO_PLATFORM", platform),
             ("GAUTO_DEVICE_UDID", device_id),
@@ -195,6 +204,7 @@ class Device(metaclass=_DeviceMeta):
                 device_ip=device_ip,
                 company_name=company_name,
                 package_name=package_name,
+                payload_name=payload_name,
             )
         except ValueError as exc:
             return cls._bind_dummy(

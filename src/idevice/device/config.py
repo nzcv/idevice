@@ -99,3 +99,8 @@ def company_name() -> str:
 def package_name() -> str:
     """Return the package name (``GAUTO_PACKAGE_NAME``)."""
     return os.environ.get("GAUTO_PACKAGE_NAME", "")
+
+
+def payload_name() -> str:
+    """Return the payload name (``GAUTO_PAYLOAD_NAME``)."""
+    return os.environ.get("GAUTO_PAYLOAD_NAME", "")

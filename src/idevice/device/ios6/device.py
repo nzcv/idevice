@@ -21,6 +21,7 @@ from idevice.device.config import device_id as env_device_id
 from idevice.device.config import device_ip as env_device_ip
 from idevice.device.config import ios4_binary
 from idevice.device.config import package_name as env_package_name
+from idevice.device.config import payload_name as env_payload_name
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +62,15 @@ class IOSDevice6(DeviceBase):
         *,
         device_ip: str = "",
         package_name: str = "",
+        payload_name: str = "",
         cache_dir: Path | None = None,
     ) -> None:
         super().__init__(
-            device_id, device_ip, platform="ios6", package_name=package_name
+            device_id,
+            device_ip,
+            platform="ios6",
+            package_name=package_name,
+            payload_name=payload_name,
         )
         configured_binary = ios4_binary()
         if IOS4CLI.resolve_binary(configured_binary) is None:
@@ -95,6 +101,7 @@ class IOSDevice6(DeviceBase):
             env_device_id(),
             device_ip=env_device_ip(),
             package_name=env_package_name(),
+            payload_name=env_payload_name(),
         )
 
     @classmethod

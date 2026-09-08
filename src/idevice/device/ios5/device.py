@@ -21,6 +21,7 @@ from idevice.device.config import device_id as env_device_id
 from idevice.device.config import device_ip as env_device_ip
 from idevice.device.config import ios4_binary, xcrun_binary
 from idevice.device.config import package_name as env_package_name
+from idevice.device.config import payload_name as env_payload_name
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
         *,
         device_ip: str = "",
         package_name: str = "",
+        payload_name: str = "",
         cache_dir: Path | None = None,
     ) -> None:
         if sys.platform != "darwin":
@@ -61,6 +63,7 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
             device_ip,
             platform="ios5",
             package_name=package_name,
+            payload_name=payload_name,
         )
         runner = SubprocessRunner()
         self._xcruncli = XcrunCLI(
@@ -88,6 +91,7 @@ class IOSDevice5(IWDA2Mixin, DeviceBase):
             env_device_id(),
             device_ip=env_device_ip(),
             package_name=env_package_name(),
+            payload_name=env_payload_name(),
         )
 
     @classmethod

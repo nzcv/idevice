@@ -33,10 +33,15 @@ class IOSDevice(DeviceBase):
         *,
         device_ip: str = "",
         package_name: str = "",
+        payload_name: str = "",
         cache_dir: Path | None = None,
     ) -> None:
         super().__init__(
-            device_id, device_ip, platform="ios", package_name=package_name
+            device_id,
+            device_ip,
+            platform="ios",
+            package_name=package_name,
+            payload_name=payload_name,
         )
         self._binary = self.DEFAULT_BINARY
         self._runner = SubprocessRunner()

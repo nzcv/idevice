@@ -43,6 +43,7 @@ class DeviceBase(ABC):
         platform: str,
         *,
         package_name: str = "",
+        payload_name: str = "",
     ):
         """Bind the instance to a single device.
 
@@ -53,6 +54,10 @@ class DeviceBase(ABC):
                 ``android``, ``windows``).
             package_name: Default app id (bundle id / package name / exe name)
                 used when callers omit ``app_id`` (e.g. :meth:`stop_app`).
+            payload_name: Optional payload identifier bound on this instance
+                (bundle id / package name / exe name). Distinct from
+                ``package_name``; stored for callers that need the install
+                payload separately from the running app id.
 
         Raises:
             ValueError: If ``device_id`` is empty or not a string.
@@ -63,7 +68,13 @@ class DeviceBase(ABC):
         self._device_ip = device_ip
         self._platform = platform
         self._package_name = package_name
+        self._payload_name = payload_name
         self._ios_name = platform if str(platform).startswith("ios") else "unknown"
+
+    @property
+    def payload_name(self) -> str:
+        """Payload name bound to this instance."""
+        return self._payload_name
 
     @property
     def ios_name(self) -> str:

@@ -27,6 +27,7 @@ class WindowsDevice(DeviceBase):
         device_ip: str = "",
         company_name: str,
         package_name: str,
+        payload_name: str = "",
         cache_dir: Path | None = None,
     ) -> None:
         if not company_name:
@@ -34,7 +35,11 @@ class WindowsDevice(DeviceBase):
         if not package_name:
             raise ValueError("package_name is required and must be a non-empty string")
         super().__init__(
-            device_id, device_ip, platform="windows", package_name=package_name
+            device_id,
+            device_ip,
+            platform="windows",
+            package_name=package_name,
+            payload_name=payload_name,
         )
         self._runner = SubprocessRunner()
         self._company_name = company_name
