@@ -155,8 +155,32 @@ class AndroidDevice(DeviceBase):
         )
         self._runner.run(command)
 
+    def _is_app_running(self, app_id: str) -> bool:
+        """Return whether ``app_id`` has a live process on the device.
+
+        Uses ``adb shell pidof``. Empty stdout with exit 1 means the package
+        is not running. Any other failure (missing ``pidof``, adb error) is
+        treated as running so callers still force-stop.
+        """
+        command = self._base_command()
+        command.extend(["shell", "pidof", app_id])
+        result = self._runner.run(command, check=False)
+        if result.stdout.strip():
+            return True
+        if result.returncode == 1 and not result.stderr.strip():
+            return False
+        logger.debug(
+            f"[AndroidDevice] Could not determine if {app_id} is running on "
+            f"{self.device_id}; assuming running "
+            f"(returncode={result.returncode}, stderr={result.stderr!r})"
+        )
+        return True
+
     def stop_app(self, app_id: str | None = None) -> None:
         target = self._resolve_app_id(app_id)
+        if not self._is_app_running(target):
+            logger.info(f"[AndroidDevice] {target} is not running on {self.device_id}")
+            return
         logger.info(f"Stopping app on Android device {self.device_id}: {target}")
         command = self._base_command()
         command.extend(["shell", "am", "force-stop", target])
