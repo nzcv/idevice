@@ -141,7 +141,11 @@ class AndroidDevice(DeviceBase):
         logger.debug(f"App {app_id} installed on Android device {self.device_id}: {installed}")
         return installed
 
-    def launch_app(self, app_id: str | None = None) -> None:
+    def launch_app(self, app_id: str | None = None,
+        *,
+        args: list[str] | None = None,
+        environment: dict[str, str] | None = None
+        ) -> None:
         target = self._resolve_app_id(app_id)
         if not self.is_installed(target):
             raise AppNotInstalledError(f"App not installed: {target}")
