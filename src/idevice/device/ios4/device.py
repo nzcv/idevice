@@ -564,10 +564,12 @@ class IOSDevice4(IWDA2Mixin, DeviceBase):
         """Download a single file, creating its local parent directory first."""
         local.parent.mkdir(parents=True, exist_ok=True)
         result = self._run_documents(app_id, "download", remote, str(local))
-        if result.returncode != 0:
+        if result.returncode != 0 or not local.is_file():
+            detail = afc_failure_detail(result)
             logger.error(
                 f"{_LOG_TAG} Failed to pull {self.device_id}:{remote} to {local}: "
-                f"{afc_failure_detail(result)}"
+                f"returncode={result.returncode}, local_exists={local.is_file()}"
+                + (f", {detail}" if detail else "")
             )
             return False
         return True

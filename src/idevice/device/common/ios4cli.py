@@ -469,10 +469,16 @@ class IOS4CLI:
 
     def documents_download(self, app_id: str, remote: str, local: Path) -> bool:
         local.parent.mkdir(parents=True, exist_ok=True)
-        return (
-            self.run_documents(app_id, "download", remote, str(local)).returncode
-            == 0
-        )
+        result = self.run_documents(app_id, "download", remote, str(local))
+        if result.returncode != 0 or not local.is_file():
+            detail = afc_failure_detail(result)
+            logger.error(
+                f"{_LOG_TAG} Failed to pull {self.device_id}:{remote} to {local}: "
+                f"returncode={result.returncode}, local_exists={local.is_file()}"
+                + (f", {detail}" if detail else "")
+            )
+            return False
+        return True
 
     def documents_push_dir(self, app_id: str, local: Path, remote: str) -> bool:
         if not self.documents_mkdir(app_id, remote):

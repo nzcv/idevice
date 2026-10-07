@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -693,13 +694,20 @@ def listing(*names: str) -> CommandResult:
 
 
 def route(responses: dict[str, CommandResult]) -> object:
-    """Dispatch a mocked runner call on ``<subcommand> <first argument>``."""
+    """Dispatch a mocked runner call on ``<subcommand> <first argument>``.
+
+    A successful ``download`` writes the destination so the pull can confirm
+    the local file actually landed.
+    """
 
     def _run(command: list[str], **_: object) -> CommandResult:
         key = " ".join(command[6:8])
         if key not in responses:
             raise AssertionError(f"unexpected command: {command}")
-        return responses[key]
+        outcome = responses[key]
+        if command[6] == "download" and outcome.returncode == 0:
+            Path(command[-1]).write_bytes(b"downloaded")
+        return outcome
 
     return _run
 
@@ -770,6 +778,62 @@ def test_documents_pull_downloads_a_file(
     ios6_device._ios4cli.runner.run.assert_called_with(
         afc_command("download", "/Documents/Logs/app.log", str(dest)), check=False
     )
+    assert dest.read_bytes() == b"downloaded"
+
+
+def test_documents_pull_logs_the_afc_download_error(
+    ios6_device: IOSDevice6, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    dest = tmp_path / "out" / "app.log"
+    payload = {
+        "ok": False,
+        "command": "download",
+        "data": None,
+        "error": {
+            "code": "operation_failed",
+            "message": "Download file: boom",
+        },
+    }
+    ios6_device._ios4cli.runner.run.side_effect = route(
+        {
+            "info /Documents/Logs/app.log": file_info("S_IFREG"),
+            "download /Documents/Logs/app.log": result(
+                returncode=1,
+                stdout=json.dumps(payload) + "\n",
+                stderr="diagnostic\n",
+            ),
+        }
+    )
+
+    with caplog.at_level(logging.ERROR):
+        assert ios6_device.documents_pull(APP_ID, "Logs/app.log", dest) is False
+
+    assert "Download file: boom" in caplog.text
+    assert "returncode=1" in caplog.text
+    assert not dest.exists()
+
+
+def test_documents_pull_logs_when_download_leaves_no_local_file(
+    ios6_device: IOSDevice6, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    dest = tmp_path / "out" / "app.log"
+
+    def _run(command: list[str], **_: object) -> CommandResult:
+        key = " ".join(command[6:8])
+        if key == "info /Documents/Logs/app.log":
+            return file_info("S_IFREG")
+        if key == "download /Documents/Logs/app.log":
+            return result()
+        raise AssertionError(f"unexpected command: {command}")
+
+    ios6_device._ios4cli.runner.run.side_effect = _run
+
+    with caplog.at_level(logging.ERROR):
+        assert ios6_device.documents_pull(APP_ID, "Logs/app.log", dest) is False
+
+    assert "local_exists=False" in caplog.text
+    assert "returncode=0" in caplog.text
+    assert not dest.exists()
 
 
 def test_documents_push_uploads_a_file(
