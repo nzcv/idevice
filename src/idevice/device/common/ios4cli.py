@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import posixpath
 import re
 import shutil
 import tempfile
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from idevice.device.base.device import AppDataPath
 from idevice.device.base.errors import (
@@ -34,13 +35,126 @@ _UDID_PATTERN = re.compile(
 _DOCUMENTS_ROOT = "/Documents"
 _DOCUMENTS_DIR_IFMT = "S_IFDIR"
 _DOCUMENTS_FILE_IFMT = "S_IFREG"
-_DOCUMENTS_IFMT_PATTERN = re.compile(r'st_ifmt:\s*"(\w+)"')
-_DOCUMENTS_LIST_ENTRY_PATTERN = re.compile(r'^\s*"((?:[^"\\]|\\.)*)",?\s*$')
 _MEMGRAPH_TIMEOUT = 600
 
 
 class IOS4CLIError(RuntimeError):
     """Raised when an ios4 CLI operation cannot be completed."""
+
+
+def parse_afc_envelope(stdout: str) -> dict[str, Any] | None:
+    """Parse one ``ios4 afc`` JSON envelope.
+
+    Args:
+        stdout: Standard output from an ``afc`` subcommand. Success and
+            failure both write one compact JSON object and a newline.
+
+    Returns:
+        dict[str, Any] | None: The envelope when ``stdout`` is a JSON object,
+        otherwise ``None``.
+    """
+    text = stdout.strip()
+    if not text:
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _envelope_error_message(payload: dict[str, Any] | None) -> str:
+    """Return ``error.message`` when the envelope carries one."""
+    if payload is None:
+        return ""
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return ""
+    message = error.get("message")
+    if isinstance(message, str):
+        return message
+    return ""
+
+
+def afc_failure_detail(result: CommandResult) -> str:
+    """Return the afc failure text for logs and exceptions.
+
+    Prefers ``error.message`` from the JSON envelope. When stdout is not that
+    envelope, falls back to stderr. The CLI reports only on stderr when it
+    cannot write the JSON response.
+
+    Args:
+        result: Completed ``ios4 afc`` command.
+
+    Returns:
+        str: Diagnostic text, possibly empty.
+    """
+    message = _envelope_error_message(parse_afc_envelope(result.stdout))
+    if message:
+        return message
+    return result.stderr.strip()
+
+
+def afc_info_ifmt(result: CommandResult) -> str | None:
+    """Return ``st_ifmt`` from a successful ``afc info`` response.
+
+    A non-zero exit or ``ok: false`` means the path is missing. A successful
+    envelope without ``st_ifmt`` is treated as a regular file.
+
+    Args:
+        result: Completed ``ios4 afc info`` command.
+
+    Returns:
+        str | None: The file type, or ``None`` when the path is absent.
+    """
+    if result.returncode != 0:
+        return None
+    payload = parse_afc_envelope(result.stdout)
+    if payload is None or payload.get("ok") is not True:
+        return None
+    data = payload.get("data")
+    if isinstance(data, dict):
+        ifmt = data.get("st_ifmt")
+        if isinstance(ifmt, str) and ifmt:
+            return ifmt
+    return _DOCUMENTS_FILE_IFMT
+
+
+def afc_list_entries(stdout: str) -> list[str]:
+    """Return names from a successful ``afc list`` envelope.
+
+    ``.`` and ``..`` are dropped. Entry strings are already decoded by JSON.
+
+    Args:
+        stdout: Standard output from ``ios4 afc list``.
+
+    Returns:
+        list[str]: Entry names under the listed directory.
+
+    Raises:
+        IOS4CLIError: If ``stdout`` is not a successful list envelope.
+    """
+    payload = parse_afc_envelope(stdout)
+    if payload is None or payload.get("ok") is not True:
+        detail = _envelope_error_message(payload)
+        suffix = f": {detail}" if detail else ""
+        raise IOS4CLIError(
+            f"{_LOG_TAG} afc list did not return a successful JSON envelope"
+            f"{suffix}"
+        )
+    data = payload.get("data")
+    entries = data.get("entries") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        raise IOS4CLIError(
+            f"{_LOG_TAG} afc list JSON envelope has no entries array"
+        )
+    return [
+        name
+        for name in entries
+        if isinstance(name, str) and name not in (".", "..")
+    ]
 
 
 class IOS4CLI:
@@ -339,38 +453,7 @@ class IOS4CLI:
 
     def documents_stat(self, app_id: str, remote: str) -> str | None:
         """Return the remote path's file type, or ``None`` if missing."""
-        result = self.run_documents(app_id, "info", remote)
-        if result.returncode != 0:
-            return None
-        match = _DOCUMENTS_IFMT_PATTERN.search(result.stdout)
-        return match.group(1) if match is not None else _DOCUMENTS_FILE_IFMT
-
-    @staticmethod
-    def unescape_listing_entry(value: str) -> str:
-        """Decode escapes in an AFC list entry."""
-        escapes = {"n": "\n", "r": "\r", "t": "\t", "0": "\0"}
-        decoded: list[str] = []
-        characters = iter(value)
-        for character in characters:
-            if character != "\\":
-                decoded.append(character)
-                continue
-            escaped = next(characters, "")
-            decoded.append(escapes.get(escaped, escaped))
-        return "".join(decoded)
-
-    @classmethod
-    def parse_documents_listing(cls, output: str) -> list[str]:
-        """Parse entry names from AFC list output."""
-        entries: list[str] = []
-        for line in output.splitlines():
-            match = _DOCUMENTS_LIST_ENTRY_PATTERN.match(line)
-            if match is None:
-                continue
-            name = cls.unescape_listing_entry(match.group(1))
-            if name not in (".", ".."):
-                entries.append(name)
-        return entries
+        return afc_info_ifmt(self.run_documents(app_id, "info", remote))
 
     def documents_mkdir(self, app_id: str, remote: str) -> bool:
         return self.run_documents(app_id, "mkdir", remote).returncode == 0
@@ -409,7 +492,7 @@ class IOS4CLI:
         if listing.returncode != 0:
             return False
         succeeded = True
-        for name in self.parse_documents_listing(listing.stdout):
+        for name in afc_list_entries(listing.stdout):
             child = posixpath.join(remote, name)
             if self.documents_stat(app_id, child) == _DOCUMENTS_DIR_IFMT:
                 succeeded &= self.documents_pull_dir(app_id, child, local / name)
@@ -433,9 +516,9 @@ class IOS4CLI:
         if result.returncode != 0:
             raise IOS4CLIError(
                 f"{_LOG_TAG} Failed to list {self.device_id}:{path}: "
-                f"{result.stderr.strip()}"
+                f"{afc_failure_detail(result)}"
             )
-        return self.parse_documents_listing(result.stdout)
+        return afc_list_entries(result.stdout)
 
     def documents_pull(
         self, app_id: str, remote: str, local: Path | str
@@ -507,4 +590,11 @@ class IOS4CLI:
         self._unsupported("delete2")
 
 
-__all__ = ["IOS4CLI", "IOS4CLIError"]
+__all__ = [
+    "IOS4CLI",
+    "IOS4CLIError",
+    "afc_failure_detail",
+    "afc_info_ifmt",
+    "afc_list_entries",
+    "parse_afc_envelope",
+]

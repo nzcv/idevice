@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -11,7 +12,7 @@ import pytest
 from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.base.errors import AppNotInstalledError
 from idevice.device.base.runner import CommandResult
-from idevice.device.common.ios4cli import IOS4CLI
+from idevice.device.common.ios4cli import IOS4CLI, IOS4CLIError
 from idevice.device.common.iwda2 import IWDA2Mixin
 from idevice.device.common.wdacli import (
     ACCEPT_ALERT_BUTTON_LABELS,
@@ -666,9 +667,15 @@ def afc_command(*arguments: str) -> list[str]:
     return [BINARY, "--udid", UDID, "afc", "--documents", APP_ID, *arguments]
 
 
+def afc_stdout(command: str, data: dict[str, object]) -> str:
+    """Build one successful ``afc`` JSON envelope."""
+    payload = {"ok": True, "command": command, "data": data, "error": None}
+    return json.dumps(payload, ensure_ascii=False) + "\n"
+
+
 def file_info(ifmt: str) -> CommandResult:
     """Fake ``afc info`` output for a directory or regular file."""
-    return result(stdout=f'FileInfo {{\n    st_ifmt: "{ifmt}",\n}}\n')
+    return result(stdout=afc_stdout("info", {"st_ifmt": ifmt}))
 
 
 MISSING = result(
@@ -678,8 +685,11 @@ MISSING = result(
 
 def listing(*names: str) -> CommandResult:
     """Fake ``afc list`` output, including the ``.``/``..`` entries."""
-    entries = "".join(f'    "{name}",\n' for name in (".", "..", *names))
-    return result(stdout=f"/Documents\n[\n{entries}]\n")
+    return result(
+        stdout=afc_stdout(
+            "list", {"path": "/Documents", "entries": [".", "..", *names]}
+        )
+    )
 
 
 def route(responses: dict[str, CommandResult]) -> object:
@@ -715,6 +725,33 @@ def test_documents_ls_lists_directory_entries(ios6_device: IOSDevice6) -> None:
     )
 
     assert ios6_device.documents_ls(APP_ID, "Logs") == ["app.log", "旧日志"]
+
+
+def test_documents_ls_reports_the_afc_error_message(
+    ios6_device: IOSDevice6,
+) -> None:
+    payload = {
+        "ok": False,
+        "command": "list",
+        "data": None,
+        "error": {
+            "code": "operation_failed",
+            "message": "List directory: boom",
+        },
+    }
+    ios6_device._ios4cli.runner.run.side_effect = route(
+        {
+            "info /Documents/Logs": file_info("S_IFDIR"),
+            "list /Documents/Logs": result(
+                returncode=1,
+                stdout=json.dumps(payload) + "\n",
+                stderr="diagnostic\n",
+            ),
+        }
+    )
+
+    with pytest.raises(IOS4CLIError, match="List directory: boom"):
+        ios6_device.documents_ls(APP_ID, "Logs")
 
 
 def test_documents_pull_downloads_a_file(

@@ -250,6 +250,7 @@ Higher-level UI helpers built on top of device tooling. Currently only `AndroidU
 - Normalized screen taps and performance monitor via the shared iwda2 mixin (`tap`, `start_moniter`, `stop_moniter`)
 - Screen capture via `screenshot`
 - Documents sandbox via `afc --documents <bundle-id>`: `documents_exists`, `documents_ls`, `documents_push`, `documents_pull`, `documents_rm`, all handling files and directories (directories are walked client-side, since `afc upload`/`download` only move single files)
+- `afc` stdout is a JSON envelope (`ok`, `command`, `data`, `error`). Documents helpers read `data.st_ifmt` and `data.entries` from that object, and take failure text from `error.message` when it is present
 - Documents paths are always relative to the vended `/Documents` root, so `remote` cannot escape the sandbox
 - Does not currently implement generic file transfer (`push` / `pull` / `ls`) outside the Documents sandbox
 

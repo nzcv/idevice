@@ -1004,11 +1004,22 @@ def test_ls_reports_a_failed_listing(ios5_device: IOSDevice5) -> None:
         ios5_device._xcruncli.ls("Documents", app_id=APP_ID)
 
 
+def afc_info_stdout(ifmt: str) -> str:
+    """Build a successful ``afc info`` JSON envelope."""
+    payload = {
+        "ok": True,
+        "command": "info",
+        "data": {"st_ifmt": ifmt},
+        "error": None,
+    }
+    return json.dumps(payload) + "\n"
+
+
 def test_documents_rm_copies_ios4_directory_removal_workflow(
     ios5_device: IOSDevice5,
 ) -> None:
     ios5_device._xcruncli.runner.run.side_effect = [
-        CommandResult(returncode=0, stdout='st_ifmt: "S_IFDIR"', stderr=""),
+        CommandResult(returncode=0, stdout=afc_info_stdout("S_IFDIR"), stderr=""),
         CommandResult(returncode=0, stdout="", stderr=""),
     ]
 
@@ -1046,7 +1057,7 @@ def test_documents_rm_uses_ios4_remove_for_a_file(
     ios5_device: IOSDevice5,
 ) -> None:
     ios5_device._xcruncli.runner.run.side_effect = [
-        CommandResult(returncode=0, stdout='st_ifmt: "S_IFREG"', stderr=""),
+        CommandResult(returncode=0, stdout=afc_info_stdout("S_IFREG"), stderr=""),
         CommandResult(returncode=0, stdout="", stderr=""),
     ]
 
@@ -1074,7 +1085,7 @@ def test_documents_rm_reports_a_failed_ios4_remove(
     ios5_device: IOSDevice5,
 ) -> None:
     ios5_device._xcruncli.runner.run.side_effect = [
-        CommandResult(returncode=0, stdout='st_ifmt: "S_IFDIR"', stderr=""),
+        CommandResult(returncode=0, stdout=afc_info_stdout("S_IFDIR"), stderr=""),
         CommandResult(returncode=1, stdout="", stderr="remove failed"),
     ]
 

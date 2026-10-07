@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -603,9 +604,15 @@ def afc_command(*arguments: str) -> list[str]:
     return [BINARY, "--udid", UDID, "afc", "--documents", APP_ID, *arguments]
 
 
+def afc_stdout(command: str, data: dict[str, object]) -> str:
+    """Build one successful ``afc`` JSON envelope."""
+    payload = {"ok": True, "command": command, "data": data, "error": None}
+    return json.dumps(payload) + "\n"
+
+
 def file_info(ifmt: str) -> CommandResult:
     """Fake ``afc info`` output for a directory or regular file."""
-    return result(stdout=f"FileInfo {{\n    size: 14,\n    st_ifmt: {ifmt!r},\n}}\n".replace("'", '"'))
+    return result(stdout=afc_stdout("info", {"size": 14, "st_ifmt": ifmt}))
 
 
 MISSING = result(returncode=134, stderr="Failed to get file info: Afc(ObjectNotFound)\n")
@@ -613,8 +620,11 @@ MISSING = result(returncode=134, stderr="Failed to get file info: Afc(ObjectNotF
 
 def listing(*names: str) -> CommandResult:
     """Fake ``afc list`` output, including the ``.``/``..`` entries."""
-    entries = "".join(f'    "{name}",\n' for name in (".", "..", *names))
-    return result(stdout=f"/Documents\n[\n{entries}]\n")
+    return result(
+        stdout=afc_stdout(
+            "list", {"path": "/Documents", "entries": [".", "..", *names]}
+        )
+    )
 
 
 def route(responses: dict[str, CommandResult]) -> object:
@@ -682,6 +692,51 @@ def test_documents_ls_raises_when_missing(ios4_device: IOSDevice4) -> None:
     ios4_device._runner.run.return_value = MISSING
 
     with pytest.raises(FileNotFoundError, match="/Documents/Logs"):
+        ios4_device.documents_ls(APP_ID, "Logs")
+
+
+def afc_error(command: str, message: str) -> CommandResult:
+    """Fake a failed ``afc`` command whose message lives in the JSON envelope."""
+    payload = {
+        "ok": False,
+        "command": command,
+        "data": None,
+        "error": {"code": "operation_failed", "message": message},
+    }
+    return result(
+        returncode=1,
+        stdout=json.dumps(payload) + "\n",
+        stderr="diagnostic\n",
+    )
+
+
+def test_documents_ls_reports_the_afc_error_message(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._runner.run.side_effect = route(
+        {
+            "info /Documents/Logs": file_info("S_IFDIR"),
+            "list /Documents/Logs": afc_error("list", "List directory: boom"),
+        }
+    )
+
+    with pytest.raises(IOSDevice4Error, match="List directory: boom"):
+        ios4_device.documents_ls(APP_ID, "Logs")
+
+
+def test_documents_ls_falls_back_to_stderr_without_json(
+    ios4_device: IOSDevice4,
+) -> None:
+    ios4_device._runner.run.side_effect = route(
+        {
+            "info /Documents/Logs": file_info("S_IFDIR"),
+            "list /Documents/Logs": result(
+                returncode=1, stderr="cannot write stdout\n"
+            ),
+        }
+    )
+
+    with pytest.raises(IOSDevice4Error, match="cannot write stdout"):
         ios4_device.documents_ls(APP_ID, "Logs")
 
 

@@ -14,7 +14,13 @@ from idevice.device.base.device import AppDataPath, DeviceBase
 from idevice.device.base.errors import AppNotInstalledError
 from idevice.device.base.runner import CommandResult, SubprocessRunner
 from idevice.device.cache import InstalledAppCache, InstalledAppInfo
-from idevice.device.common.ios4cli import IOS4CLI
+from idevice.device.common.ios4cli import (
+    IOS4CLI,
+    IOS4CLIError,
+    afc_failure_detail,
+    afc_info_ifmt,
+    afc_list_entries,
+)
 from idevice.device.common.iwda2 import IWDA2Mixin
 from idevice.device.config import device_id as env_device_id
 from idevice.device.config import device_ip as env_device_ip
@@ -33,9 +39,6 @@ _INSTALL_SUCCESS_MARKERS = (
 _PID_PATTERN = re.compile(r"(?m)^PID:\s*(\d+)\s*$")
 _DOCUMENTS_ROOT = "/Documents"
 _DOCUMENTS_DIR_IFMT = "S_IFDIR"
-_DOCUMENTS_FILE_IFMT = "S_IFREG"
-_DOCUMENTS_IFMT_PATTERN = re.compile(r'st_ifmt:\s*"(\w+)"')
-_DOCUMENTS_LIST_ENTRY_PATTERN = re.compile(r'^\s*"((?:[^"\\]|\\.)*)",?\s*$')
 
 
 class IOSDevice4Error(RuntimeError):
@@ -526,43 +529,11 @@ class IOSDevice4(IWDA2Mixin, DeviceBase):
 
     def _documents_stat(self, app_id: str, remote: str) -> str | None:
         """Return the ``st_ifmt`` of ``remote``, or ``None`` when it is missing."""
-        result = self._run_documents(app_id, "info", remote)
-        if result.returncode != 0:
-            return None
-        match = _DOCUMENTS_IFMT_PATTERN.search(result.stdout)
-        return match.group(1) if match is not None else _DOCUMENTS_FILE_IFMT
+        return afc_info_ifmt(self._run_documents(app_id, "info", remote))
 
     def _documents_is_dir(self, app_id: str, remote: str) -> bool:
         """Return whether ``remote`` is an existing directory."""
         return self._documents_stat(app_id, remote) == _DOCUMENTS_DIR_IFMT
-
-    @staticmethod
-    def _unescape_listing_entry(value: str) -> str:
-        """Decode the escapes ``afc list`` writes in its quoted entry names."""
-        escapes = {"n": "\n", "r": "\r", "t": "\t", "0": "\0"}
-        decoded: list[str] = []
-        characters = iter(value)
-        for character in characters:
-            if character != "\\":
-                decoded.append(character)
-                continue
-            escaped = next(characters, "")
-            decoded.append(escapes.get(escaped, escaped))
-        return "".join(decoded)
-
-    @classmethod
-    def _parse_documents_listing(cls, output: str) -> list[str]:
-        """Parse entry names out of ``afc list`` output, dropping ``.``/``..``."""
-        entries: list[str] = []
-        for line in output.splitlines():
-            match = _DOCUMENTS_LIST_ENTRY_PATTERN.match(line)
-            if match is None:
-                continue
-            name = cls._unescape_listing_entry(match.group(1))
-            if name in (".", ".."):
-                continue
-            entries.append(name)
-        return entries
 
     def _documents_mkdir(self, app_id: str, remote: str) -> bool:
         """Create ``remote`` and any missing parents. Existing dirs are fine."""
@@ -570,7 +541,7 @@ class IOSDevice4(IWDA2Mixin, DeviceBase):
         if result.returncode != 0:
             logger.error(
                 f"{_LOG_TAG} Failed to create {self.device_id}:{remote}: "
-                f"{result.stderr.strip()}"
+                f"{afc_failure_detail(result)}"
             )
             return False
         return True
@@ -584,7 +555,7 @@ class IOSDevice4(IWDA2Mixin, DeviceBase):
         if result.returncode != 0:
             logger.error(
                 f"{_LOG_TAG} Failed to push {local} to {self.device_id}:{remote}: "
-                f"{result.stderr.strip()}"
+                f"{afc_failure_detail(result)}"
             )
             return False
         return True
@@ -596,7 +567,7 @@ class IOSDevice4(IWDA2Mixin, DeviceBase):
         if result.returncode != 0:
             logger.error(
                 f"{_LOG_TAG} Failed to pull {self.device_id}:{remote} to {local}: "
-                f"{result.stderr.strip()}"
+                f"{afc_failure_detail(result)}"
             )
             return False
         return True
@@ -625,11 +596,11 @@ class IOSDevice4(IWDA2Mixin, DeviceBase):
         if listing.returncode != 0:
             logger.error(
                 f"{_LOG_TAG} Failed to list {self.device_id}:{remote}: "
-                f"{listing.stderr.strip()}"
+                f"{afc_failure_detail(listing)}"
             )
             return False
         succeeded = True
-        for name in self._parse_documents_listing(listing.stdout):
+        for name in afc_list_entries(listing.stdout):
             child = posixpath.join(remote, name)
             if self._documents_is_dir(app_id, child):
                 succeeded &= self._documents_pull_dir(app_id, child, local / name)
@@ -663,9 +634,12 @@ class IOSDevice4(IWDA2Mixin, DeviceBase):
         if result.returncode != 0:
             raise IOSDevice4Error(
                 f"{_LOG_TAG} Failed to list {self.device_id}:{path}: "
-                f"{result.stderr.strip()}"
+                f"{afc_failure_detail(result)}"
             )
-        return self._parse_documents_listing(result.stdout)
+        try:
+            return afc_list_entries(result.stdout)
+        except IOS4CLIError as exc:
+            raise IOSDevice4Error(str(exc)) from exc
 
     def documents_pull(
         self, app_id: str, remote: str, local: Path | str
@@ -718,7 +692,7 @@ class IOSDevice4(IWDA2Mixin, DeviceBase):
         if result.returncode != 0:
             logger.error(
                 f"{_LOG_TAG} Failed to remove {self.device_id}:{path}: "
-                f"{result.stderr.strip()}"
+                f"{afc_failure_detail(result)}"
             )
             return False
         return True
