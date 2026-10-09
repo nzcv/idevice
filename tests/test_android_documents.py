@@ -123,7 +123,7 @@ def test_documents_push_makes_parent_and_pushes(device: AndroidDevice, tmp_path)
     ok = device.documents_push(APP_ID, local, "logs/in.txt")
 
     assert ok is True
-    mkdir_call, push_call = runner.run.call_args_list
+    mkdir_call, push_call, chmod_call = runner.run.call_args_list
     assert mkdir_call.args[0] == [
         "adb",
         "-s",
@@ -140,6 +140,16 @@ def test_documents_push_makes_parent_and_pushes(device: AndroidDevice, tmp_path)
         "push",
         str(local),
         f"{ROOT}/logs/in.txt",
+    ]
+    assert chmod_call.args[0] == [
+        "adb",
+        "-s",
+        "serial-1",
+        "shell",
+        "chmod",
+        "777",
+        "-R",
+        f"'{ROOT}/logs'",
     ]
 
 

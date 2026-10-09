@@ -347,7 +347,17 @@ class AndroidDevice(DeviceBase):
         command = self._base_command()
         command.extend(["push", str(local_path), path])
         result = self._runner.run(command, check=False)
-        return result.returncode == 0
+        if result.returncode != 0:
+            return False
+        # adb push creates shell-owned files. The app then hits
+        # UnauthorizedAccessException opening them
+        chmod_target = parent or path
+        chmod_cmd = self._base_command()
+        chmod_cmd.extend(["shell", "chmod", "777", "-R", self._shell_quote(chmod_target)])
+        chmod_result = self._runner.run(chmod_cmd, check=False)
+        if chmod_result.returncode != 0:
+            logger.warning(f"[AndroidDevice] chmod failed for {self.device_id}:{chmod_target}")
+        return True
 
     def documents_rm(self, app_id: str, remote: str) -> bool:
         """Remove a file or directory from the app's external files dir."""
