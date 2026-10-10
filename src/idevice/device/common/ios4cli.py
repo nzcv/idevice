@@ -332,6 +332,74 @@ class IOS4CLI:
             )
         return int(match.group(1))
 
+    def get_pid(self, name: str) -> int | None:
+        """Return the PID of a running process named ``name``.
+
+        Uses ``device_info processes --json``. ``name`` is the executable
+        name (for example ``MyApp``), matched exactly against the process
+        ``name`` field. An application process wins over a same-named
+        non-application. When several still match, the lowest PID is used.
+
+        Args:
+            name: Executable name to look up.
+
+        Returns:
+            int | None: The matching PID, or ``None`` when no process matches.
+
+        Raises:
+            ValueError: If ``name`` is empty.
+            IOS4CLIError: If the process listing fails or is not a JSON array.
+        """
+        if not name:
+            raise ValueError("name is required and must be a non-empty string")
+        result = self.run("device_info", "processes", "--json", check=False)
+        if result.returncode != 0:
+            raise IOS4CLIError(
+                f"{_LOG_TAG} Failed to list processes on {self.device_id}: "
+                f"returncode={result.returncode}, stdout={result.stdout!r}, "
+                f"stderr={result.stderr!r}"
+            )
+        return self.pid_for_process_name(result.stdout, name)
+
+    @staticmethod
+    def pid_for_process_name(stdout: str, name: str) -> int | None:
+        """Pick a PID from ``device_info processes --json`` output.
+
+        Args:
+            stdout: JSON array printed by ``device_info processes --json``.
+            name: Executable name to match exactly.
+
+        Returns:
+            int | None: The preferred matching PID, or ``None`` when absent.
+
+        Raises:
+            IOS4CLIError: If ``stdout`` is not a JSON array.
+        """
+        try:
+            processes = json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            raise IOS4CLIError(
+                f"{_LOG_TAG} device_info processes did not return JSON: "
+                f"{stdout!r}"
+            ) from exc
+        if not isinstance(processes, list):
+            raise IOS4CLIError(
+                f"{_LOG_TAG} device_info processes did not return a JSON "
+                f"array: {stdout!r}"
+            )
+        matches: list[tuple[bool, int]] = []
+        for process in processes:
+            if not isinstance(process, dict) or process.get("name") != name:
+                continue
+            pid = process.get("pid")
+            if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+                continue
+            matches.append((process.get("isApplication") is True, pid))
+        if not matches:
+            return None
+        matches.sort(key=lambda item: (not item[0], item[1]))
+        return matches[0][1]
+
     def launch(self, app_id: str) -> None:
         """Launch an app without launch arguments."""
         self.run("process_control", app_id)

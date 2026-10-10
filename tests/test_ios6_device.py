@@ -350,11 +350,15 @@ def test_launch_app_keeps_pid_none_when_wda_omits_it(
     ios6_device.launch_app(APP_ID)
 
     # facebook-wda 1.5.4 has no session.pid, and neither the session
-    # body nor /wda/activeAppInfo supplied a replacement.
+    # body nor /wda/activeAppInfo supplied a replacement. An empty
+    # payload name skips the ios4 process lookup.
     assert ios6_device.last_launch_pid is None
     assert ios6_device._last_launch_app_id == APP_ID
     assert "app_list" not in wda_client.calls
     assert "app_current" in wda_client.calls
+    assert all(
+        "device_info" not in command for command in ios4_commands(ios6_device)
+    )
 
 
 def test_launch_app_reads_pid_from_the_session_create_body(
@@ -396,6 +400,135 @@ def test_launch_app_ignores_a_foreground_pid_for_another_app(
     ios6_device.launch_app(APP_ID)
 
     assert ios6_device.last_launch_pid is None
+
+
+def _listing_then(processes: CommandResult):
+    """Answer the install check, then one ``device_info processes`` call."""
+
+    def _run(command: list[str], **_: object) -> CommandResult:
+        if command[3] == "application_listing":
+            return result(stdout=INSTALLED_LISTING)
+        if command[3:6] == ["device_info", "processes", "--json"]:
+            return processes
+        raise AssertionError(f"unexpected command: {command}")
+
+    return _run
+
+
+def test_launch_app_reads_the_payload_process_when_wda_omits_the_pid(
+    ios6_device: IOSDevice6, wda_client: FakeWDAClient
+) -> None:
+    ios6_device._payload_name = "MyApp"
+    wda_client.launch_pid = None
+    ios6_device._ios4cli.runner.run.side_effect = _listing_then(
+        result(
+            stdout=json.dumps(
+                [
+                    {
+                        "pid": True,
+                        "name": "MyApp",
+                        "isApplication": True,
+                    },
+                    {
+                        "pid": 1,
+                        "name": "myapp",
+                        "realAppName": "/var/MyApp.app/myapp",
+                        "isApplication": True,
+                    },
+                    {
+                        "pid": 2,
+                        "name": "Other",
+                        "realAppName": (
+                            "/var/containers/Bundle/Application/UUID/"
+                            "MyApp.app/MyApp"
+                        ),
+                        "isApplication": True,
+                    },
+                    {
+                        "pid": 10,
+                        "name": "MyApp",
+                        "realAppName": "/usr/libexec/MyApp",
+                        "isApplication": False,
+                    },
+                    {
+                        "pid": 90,
+                        "name": "MyApp",
+                        "realAppName": (
+                            "/var/containers/Bundle/Application/UUID/"
+                            "MyApp.app/MyApp"
+                        ),
+                        "isApplication": True,
+                    },
+                    {
+                        "pid": 40,
+                        "name": "MyApp",
+                        "realAppName": (
+                            "/var/containers/Bundle/Application/UUID/"
+                            "MyApp.app/MyApp"
+                        ),
+                        "isApplication": True,
+                    },
+                ]
+            )
+        )
+    )
+
+    ios6_device.launch_app(APP_ID)
+
+    assert [
+        BINARY,
+        "--udid",
+        UDID,
+        "device_info",
+        "processes",
+        "--json",
+    ] in ios4_commands(ios6_device)
+    assert ios6_device.last_launch_pid == 40
+    assert ios6_device._last_launch_app_id == APP_ID
+
+
+def test_launch_app_leaves_the_pid_unset_when_the_payload_is_not_running(
+    ios6_device: IOSDevice6, wda_client: FakeWDAClient
+) -> None:
+    ios6_device._payload_name = "MyApp"
+    wda_client.launch_pid = None
+    ios6_device._ios4cli.runner.run.side_effect = _listing_then(
+        result(
+            stdout=json.dumps(
+                [
+                    {
+                        "pid": 5,
+                        "name": "SpringBoard",
+                        "realAppName": (
+                            "/System/Library/CoreServices/SpringBoard.app/"
+                            "SpringBoard"
+                        ),
+                        "isApplication": True,
+                    }
+                ]
+            )
+        )
+    )
+
+    ios6_device.launch_app(APP_ID)
+
+    assert ios6_device.last_launch_pid is None
+    assert ios6_device._last_launch_app_id == APP_ID
+
+
+def test_launch_app_survives_a_failed_payload_pid_lookup(
+    ios6_device: IOSDevice6, wda_client: FakeWDAClient
+) -> None:
+    ios6_device._payload_name = "MyApp"
+    wda_client.launch_pid = None
+    ios6_device._ios4cli.runner.run.side_effect = _listing_then(
+        result(returncode=1, stderr="Failed to list running processes\n")
+    )
+
+    ios6_device.launch_app(APP_ID)
+
+    assert ios6_device.last_launch_pid is None
+    assert ios6_device._last_launch_app_id == APP_ID
 
 
 def test_launch_app_raises_instead_of_falling_back_to_ios4(

@@ -156,9 +156,13 @@ class IOSDevice6(DeviceBase):
         capability does not reach WDA (it is posted outside ``alwaysMatch``),
         so the selector is what actually starts the monitor.
 
-        A successful launch records the PID in :attr:`last_launch_pid` when
-        WDA reports one, so a following :meth:`capture_memgraph` can use it
-        without an explicit ``pid`` argument.
+        A successful launch records the PID in :attr:`last_launch_pid`. The
+        PID comes from WDA when it reports one. When WDA omits it and
+        :attr:`payload_name` is set, the PID is read from
+        ``ios4 device_info processes`` by matching that executable name. A
+        process-list failure leaves the PID unset. A following
+        :meth:`capture_memgraph` can use the recorded PID without an explicit
+        ``pid`` argument.
 
         Args:
             app_id: Bundle identifier to launch. When omitted or empty, uses
@@ -193,9 +197,20 @@ class IOSDevice6(DeviceBase):
                 alert_action=alert_action,
                 accept_button_labels=accept_button_labels,
             )
+            if pid is None and self.payload_name:
+                logger.info(
+                    f"{_LOG_TAG} Getting PID for {self.payload_name} through ios4"
+                )
+                try:
+                    pid = self._ios4cli.get_pid(self.payload_name)
+                except IOS4CLIError as exc:
+                    logger.warning(
+                        f"{_LOG_TAG} Could not read a PID for "
+                        f"{self.payload_name}: {exc}"
+                    )
         except WDACLIError as exc:
             raise IOSDevice6Error(str(exc)) from exc
-
+        logger.info(f"{_LOG_TAG} Launched {target} on {self.device_id} with PID {pid}")
         self._last_launch_pid = pid
         self._last_launch_app_id = target
 
